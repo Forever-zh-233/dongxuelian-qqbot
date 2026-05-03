@@ -74,6 +74,7 @@ function createTestDataDir(options = {}) {
   writeText(path.join(dataDir, 'ai-glm-key.txt'), options.glmKey || 'sk-test-glm')
   writeText(path.join(dataDir, 'ai-mimorium-key.txt'), options.mimoriumKey || 'sk-test-mimo')
 
+  writeJson(path.join(dataDir, 'ai-admin-ids.json'), options.adminUserIds || ['532701045', '3514272382'])
   writeJson(path.join(dataDir, 'ai-repeat-enabled.json'), options.repeatEnabled || {})
   writeJson(path.join(dataDir, 'ai-random-whitelist.json'), options.randomWhitelist || [])
   writeJson(path.join(dataDir, 'ai-random-rate.json'), options.randomRate || {})
