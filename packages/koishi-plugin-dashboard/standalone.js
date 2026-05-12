@@ -257,12 +257,25 @@ function hashFile(hash, repoRoot, filePath) {
   } catch {}
 }
 
+function getFrontendDistAssetRefs(distDir = DIST_DIR) {
+  const indexFile = path.join(distDir, 'index.html')
+  let html = ''
+  try { html = fs.readFileSync(indexFile, 'utf8') } catch { return [] }
+  const refs = new Set()
+  const re = /(?:src|href)=["']\/dashboard\/(assets\/[^"']+)["']/g
+  let match
+  while ((match = re.exec(html))) refs.add(match[1])
+  return [...refs]
+}
+
 function hasFrontendDistAssets(distDir = DIST_DIR) {
   const indexFile = path.join(distDir, 'index.html')
   const assetsDir = path.join(distDir, 'assets')
   if (!fs.existsSync(indexFile) || !fs.existsSync(assetsDir)) return false
-  try { return fs.readdirSync(assetsDir).some(name => /\.js$/i.test(name)) }
-  catch { return false }
+  const refs = getFrontendDistAssetRefs(distDir)
+  if (!refs.length) return false
+  if (!refs.every(ref => fs.existsSync(path.join(distDir, ref)))) return false
+  return refs.some(ref => /\.js$/i.test(ref))
 }
 
 function assertFrontendDistReady(distDir = DIST_DIR) {
@@ -3856,6 +3869,11 @@ const server = http.createServer((req, res) => {
   let reqPath = pathname.replace(/^\/dashboard\/?/, '')
   try { reqPath = decodeURIComponent(reqPath) } catch {}
   if (serveFile(path.join(DIST_DIR, reqPath || 'index.html'))) return
+  if (pathname.startsWith('/dashboard/assets/') || pathname.startsWith('/dashboard/backgrounds/')) {
+    res.writeHead(404)
+    res.end('Not Found')
+    return
+  }
   if (!pathname.startsWith('/dashboard/api/') && serveFile(path.join(DIST_DIR, 'index.html'))) return
     res.writeHead(404)
     res.end('Not Found')
