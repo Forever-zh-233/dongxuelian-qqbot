@@ -73,17 +73,14 @@ export default {
   display: flex;
   flex-direction: column;
   isolation: isolate;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012) 52%, rgba(255, 255, 255, 0.004) 100%),
-    rgba(255, 255, 255, 0.01);
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  border-right: 1px solid color-mix(in srgb, var(--border) 58%, rgba(255,255,255,0.08));
   box-shadow:
-    7px 0 26px rgba(0, 0, 0, 0.12),
-    inset 1px 0 0 rgba(255, 255, 255, 0.09),
-    inset -1px 0 0 rgba(255, 255, 255, 0.028);
-  backdrop-filter: blur(62px) saturate(1.78) contrast(1.01);
-  -webkit-backdrop-filter: blur(62px) saturate(1.78) contrast(1.01);
-  transition: width .32s cubic-bezier(.4, 0, .2, 1), height .32s cubic-bezier(.4, 0, .2, 1), border-color .2s, box-shadow .32s ease, background .2s;
+    0 20px 70px rgba(0, 0, 0, 0.1),
+    inset 1px 0 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
+  -webkit-backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
+  transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1), height 0.32s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s, box-shadow 0.32s ease, background 0.2s;
   overflow: hidden;
 }
 
@@ -97,35 +94,33 @@ export default {
 }
 
 .dashboard-sidebar::before {
-  inset: -18%;
+  inset: -1px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.023), transparent 30%, rgba(255, 255, 255, 0.008)),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.016), transparent 62%);
-  opacity: .34;
-  filter: blur(22px);
+    linear-gradient(105deg, rgba(255,255,255,0.03), rgba(255,255,255,0.002) 48%, color-mix(in srgb, var(--accent) 4%, transparent)),
+    color-mix(in srgb, var(--card) 5%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--border) 48%, rgba(255,255,255,0.06));
+  filter: none;
+  opacity: 1;
+  animation: none;
 }
 
 .dashboard-sidebar::after {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.014), transparent 18%);
-  opacity: .22;
+  content: none;
 }
 
 .dashboard-sidebar.collapsed {
   bottom: auto;
   width: 64px;
   height: 72px;
-  background:
-    linear-gradient(150deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.014) 54%, rgba(255, 255, 255, 0.006)),
-    rgba(255, 255, 255, 0.012);
-  border-right-color: rgba(255, 255, 255, 0.07);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.058);
+  background: transparent;
+  border-right-color: color-mix(in srgb, var(--border) 58%, rgba(255,255,255,0.08));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, rgba(255,255,255,0.06));
   border-bottom-right-radius: 12px;
   box-shadow:
-    10px 12px 26px rgba(0, 0, 0, 0.14),
-    inset 1px 0 0 rgba(255, 255, 255, 0.08),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(52px) saturate(1.52) contrast(1.01);
-  -webkit-backdrop-filter: blur(52px) saturate(1.52) contrast(1.01);
+    0 12px 40px rgba(0, 0, 0, 0.1),
+    inset 1px 0 0 rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
+  -webkit-backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
 }
 
 .sidebar-head {
@@ -134,7 +129,7 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 16px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.062);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 44%, rgba(255,255,255,0.06));
   position: relative;
   z-index: 1;
 }
@@ -147,8 +142,8 @@ export default {
 }
 
 .sidebar-toggle {
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(255, 255, 255, 0.018);
+  border: 1px solid color-mix(in srgb, var(--border) 52%, rgba(255,255,255,0.08));
+  background: color-mix(in srgb, var(--input) 18%, transparent);
   color: var(--text2);
   cursor: pointer;
   transition: color .18s, background .18s, transform .14s cubic-bezier(.2, .8, .2, 1), box-shadow .18s;
@@ -263,7 +258,7 @@ export default {
   justify-content: center;
   gap: 0;
   padding: 8px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.058);
+  border-top: 1px solid color-mix(in srgb, var(--border) 40%, rgba(255,255,255,0.06));
   border-radius: 0;
   font-size: 14px;
   font-weight: 700;
@@ -275,13 +270,13 @@ export default {
 
 .sidebar-nav .sidebar-item:last-child,
 .sidebar-foot .sidebar-item:last-child {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.052);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 38%, rgba(255,255,255,0.05));
 }
 
 .sidebar-item.active {
   color: var(--text);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 11%, transparent), transparent 72%);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 48%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 34%, transparent), inset 0 1px 0 rgba(255,255,255,0.08);
 }
 
 .sidebar-item.active::before {
@@ -412,7 +407,7 @@ export default {
   flex-direction: column;
   gap: 0;
   padding: 12px 10px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid color-mix(in srgb, var(--border) 44%, rgba(255,255,255,0.06));
   position: relative;
   z-index: 1;
 }
@@ -421,14 +416,22 @@ export default {
   gap: 10px;
 }
 
+@keyframes waterRipple {
+  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.3; }
+  25% { transform: translate3d(8px, -4px, 0) scale(1.02); opacity: 0.4; }
+  50% { transform: translate3d(-4px, 6px, 0) scale(0.98); opacity: 0.35; }
+  75% { transform: translate3d(6px, -2px, 0) scale(1.01); opacity: 0.38; }
+  100% { transform: translate3d(-2px, 0, 0) scale(1); opacity: 0.3; }
+}
+
 @media (max-width: 760px) {
   .dashboard-sidebar {
     width: min(57.4vw, 210px);
     box-shadow:
-      8px 0 28px rgba(0, 0, 0, 0.18),
+      0 18px 58px rgba(0, 0, 0, 0.1),
       inset 1px 0 0 rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(46px) saturate(1.48) contrast(1.01);
-    -webkit-backdrop-filter: blur(46px) saturate(1.48) contrast(1.01);
+    backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
+    -webkit-backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
   }
   .dashboard-sidebar.collapsed {
     width: 56px;

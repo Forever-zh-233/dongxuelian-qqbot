@@ -76,6 +76,7 @@ export default {
       { id: 'monet-purple', label: '莫奈紫', desc: '雾紫、青蓝和浅灰的柔和组合', colors: ['#f7f4ff', '#8b5cf6', '#38bdf8'] },
       { id: 'ocean-cyan', label: '海盐青', desc: '青蓝主色，信息面板更清透', colors: ['#ecfeff', '#0891b2', '#155e75'] },
       { id: 'graphite-blue', label: '石墨蓝', desc: '冷静灰蓝，适合夜间运维', colors: ['#0f172a', '#60a5fa', '#dbeafe'] },
+      { id: 'clear-water', label: '清水紫', desc: '深蓝紫底色，像清澈水面一样轻透', colors: ['#071225', '#7dd3fc', '#8b5cf6'] },
       { id: 'crimson-red', label: '赤焰红', desc: '深暗底色配红色强调，适合警戒感', colors: ['#160b0d', '#ef4444', '#ffd4d4'] },
       { id: 'sakura-pink', label: '樱花粉', desc: '柔美粉白配桃红点缀，清新甜美', colors: ['#fff6fa', '#ec4899', '#fbcfe8'] },
     ]

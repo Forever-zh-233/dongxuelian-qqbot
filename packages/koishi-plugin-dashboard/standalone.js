@@ -45,7 +45,8 @@ const PERSONAS_DIR = path.join(DATA_DIR, 'ai-skills', 'personas')
 const CORE_DIR = path.join(DATA_DIR, 'ai-skills', 'core')
 const LORES_DIR = path.join(DATA_DIR, 'ai-skills', 'lore')
 const MODES_DIR = path.join(DATA_DIR, 'ai-skills', 'modes')
-const DIST_DIR = path.join(PLUGIN_ROOT, 'frontend', 'dist')
+const FE_DIR = path.join(PLUGIN_ROOT, 'frontend')
+const DIST_DIR = path.join(FE_DIR, 'dist')
 const PORT = process.env.DASHBOARD_PORT || 5150
 const PASSWORD = process.env.DASHBOARD_PASSWORD || '123'
 const ADMIN_PASSWORD = process.env.DASHBOARD_ADMIN_PASSWORD || '123'
@@ -264,8 +265,18 @@ function hasFrontendDistAssets(distDir = DIST_DIR) {
   catch { return false }
 }
 
-function assertFrontendDistReady() {
-  if (!hasFrontendDistAssets()) throw new Error('frontend dist is missing or incomplete; rebuild frontend first')
+function assertFrontendDistReady(distDir = DIST_DIR) {
+  if (!hasFrontendDistAssets(distDir)) throw new Error('frontend dist is missing or incomplete; rebuild frontend first')
+}
+
+function assertFrontendBuildSourceReady(feDir = FE_DIR) {
+  const required = ['package.json', 'index.html', 'vite.config.js', 'src']
+  for (const name of required) {
+    if (!fs.existsSync(path.join(feDir, name))) throw new Error('frontend source is missing: ' + path.join(feDir, name))
+  }
+  if (!fs.existsSync(path.join(feDir, 'node_modules'))) {
+    throw new Error('前端依赖未安装，请先在 frontend 目录执行 npm install')
+  }
 }
 
 function rollbackFrontendDist(distDir, backupDir) {
@@ -275,6 +286,59 @@ function rollbackFrontendDist(distDir, backupDir) {
     if (fs.existsSync(backupDir)) fs.renameSync(backupDir, distDir)
   } catch (e) { return 'restore previous dist failed: ' + e.message }
   return ''
+}
+
+function buildFrontendDist(options = {}, callback) {
+  const feDir = options.feDir || FE_DIR
+  const distDir = options.distDir || DIST_DIR
+  const backupDir = options.backupDir || path.join(feDir, 'dist.bak')
+  const startedAt = Date.now()
+  const logFn = typeof options.log === 'function' ? options.log : () => {}
+  const updateStatus = typeof options.updateStatus === 'function' ? options.updateStatus : null
+  const done = typeof callback === 'function' ? callback : () => {}
+
+  try {
+    assertFrontendBuildSourceReady(feDir)
+    logFn('frontend build source: ' + feDir)
+    logFn('frontend build dist: ' + distDir)
+    fs.rmSync(backupDir, { recursive: true, force: true })
+    if (fs.existsSync(distDir)) fs.renameSync(distDir, backupDir)
+  } catch (e) {
+    if (updateStatus) updateStatus({ state: 'failed', message: 'frontend build preparation failed', detail: e.message, startedAt, finishedAt: Date.now() })
+    done(e)
+    return false
+  }
+
+  if (updateStatus) updateStatus({ state: 'building', message: 'building', detail: '', startedAt, finishedAt: 0 })
+  logFn('frontend build start: npm run build')
+  exec('npm run build', { cwd: feDir, timeout: 120000 }, (err, stdout, stderr) => {
+    try {
+      if (stdout) logFn(stdout.trim())
+      if (stderr) logFn(stderr.trim())
+      if (err) {
+        const rollbackError = rollbackFrontendDist(distDir, backupDir)
+        const detail = [stderr || err.message || '', rollbackError].filter(Boolean).join('\n').slice(-1200)
+        if (updateStatus) updateStatus({ state: 'failed', message: 'frontend build failed and rolled back', detail, startedAt, finishedAt: Date.now() })
+        done(new Error(detail || 'frontend build failed'))
+        return
+      }
+      if (!hasFrontendDistAssets(distDir)) {
+        const rollbackError = rollbackFrontendDist(distDir, backupDir)
+        const detail = rollbackError || 'frontend dist is incomplete'
+        if (updateStatus) updateStatus({ state: 'failed', message: 'frontend dist is incomplete and rolled back', detail, startedAt, finishedAt: Date.now() })
+        done(new Error(detail))
+        return
+      }
+      fs.rmSync(backupDir, { recursive: true, force: true })
+      if (updateStatus) updateStatus({ state: 'success', message: 'frontend build success', detail: '', startedAt, finishedAt: Date.now() })
+      logFn('frontend build success')
+      done(null)
+    } catch (e) {
+      if (updateStatus) updateStatus({ state: 'failed', message: 'frontend rebuild cleanup failed', detail: e.message, startedAt, finishedAt: Date.now() })
+      done(e)
+    }
+  })
+  return true
 }
 
 function copyRecursiveSync(src, dst) {
@@ -2328,9 +2392,19 @@ function computeFingerprint() {
     const hash = crypto.createHash('md5')
     const add = rel => hashFile(hash, repoRoot, path.join(repoRoot, rel))
     add('packages/koishi-plugin-dashboard/standalone.js')
+    add('packages/koishi-plugin-dashboard/frontend/index.html')
+    add('packages/koishi-plugin-dashboard/frontend/package.json')
+    add('packages/koishi-plugin-dashboard/frontend/package-lock.json')
+    add('packages/koishi-plugin-dashboard/frontend/vite.config.js')
     add('packages/koishi-plugin-dashboard/frontend/dist/index.html')
     add('scripts/restart-bot.sh')
     add('scripts/watchdog.sh')
+    for (const file of listFilesRecursive(path.join(repoRoot, 'packages', 'koishi-plugin-dashboard', 'frontend', 'src'))) {
+      hashFile(hash, repoRoot, file)
+    }
+    for (const file of listFilesRecursive(path.join(repoRoot, 'packages', 'koishi-plugin-dashboard', 'frontend', 'public'))) {
+      hashFile(hash, repoRoot, file)
+    }
     for (const file of listFilesRecursive(path.join(repoRoot, 'packages', 'koishi-plugin-dashboard', 'frontend', 'dist', 'assets'))) {
       hashFile(hash, repoRoot, file)
     }
@@ -3257,69 +3331,104 @@ const server = http.createServer((req, res) => {
         if (cfg.mode === 'install') {
           return json(res, { ok: false, message: 'First-time install is not automated yet. Please run setup.sh or a local installer first.' }, 400)
         }
-        assertFrontendDistReady()
+        if (rebuildStatus.state === 'building') return json(res, { ok: false, message: '前端正在构建中，请等待完成' }, 400)
         if (!cfg.server || !cfg.appDir) return json(res, { ok: false, message: '配置不完整' }, 400)
         const taskId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
         const logFile = path.join(DEPLOY_TASKS_DIR, taskId + '.log')
         const log = (msg) => { try { fs.appendFileSync(logFile, msg + '\n', 'utf8') } catch {} }
         json(res, { ok: true, taskId })
 
-        const repoRoot = path.join(PLUGIN_ROOT, '..', '..')
-        const s = cfg.server
-        const d = cfg.appDir
-        const pkgs = [
-          'koishi-plugin-dongxuelian-ai', 'koishi-plugin-dongxuelian-help',
-          'koishi-plugin-group-name-at', 'koishi-plugin-defense',
-          'koishi-plugin-local-video-sender', 'koishi-plugin-group-leave-notice',
-          'koishi-plugin-dongxuelian-poke', 'koishi-plugin-daily-report',
-        ]
-        const cmds = []
-        const dashboardDir = remoteJoin(d, 'packages', 'koishi-plugin-dashboard')
-        const dashboardDistDir = remoteJoin(dashboardDir, 'frontend', 'dist')
-        const scriptsDir = remoteJoin(d, 'scripts')
-        const dataDir = remoteJoin(d, 'data')
-        const existingInstallCheck = `test -f ${shellQuote(remoteJoin(d, 'node_modules', 'koishi', 'bin.js'))} && (test -f ${shellQuote(remoteJoin(d, 'koishi.config.js'))} || test -f ${shellQuote(remoteJoin(d, 'koishi.yml'))})`
-        cmds.push(`echo "preflight"`)
-        cmds.push(sshCommand(s, existingInstallCheck))
-        cmds.push(`echo "prepare dirs"`)
-        cmds.push(sshCommand(s, `mkdir -p ${[dataDir, dashboardDir, dashboardDistDir, scriptsDir].concat(pkgs.map(pkg => remoteJoin(d, 'node_modules', pkg, 'lib'))).map(shellQuote).join(' ')}`))
-        for (const pkg of pkgs) {
-          cmds.push(`echo "→ ${pkg}"`)
-          cmds.push(scpCommand(path.join(repoRoot, 'packages', pkg, 'lib'), scpRemoteTarget(s, remoteJoin(d, 'node_modules', pkg)), { recursive: true }))
-          cmds.push(scpCommand(path.join(repoRoot, 'packages', pkg, 'package.json'), scpRemoteTarget(s, remoteJoin(d, 'node_modules', pkg, 'package.json'))))
-        }
-        cmds.push(`echo "Dashboard 前端..."`)
-        cmds.push(scpCommand(path.join(PLUGIN_ROOT, 'standalone.js'), scpRemoteTarget(s, remoteJoin(dashboardDir, 'standalone.js'))))
-        cmds.push(scpCommand(DIST_DIR, scpRemoteTarget(s, remoteJoin(dashboardDir, 'frontend')), { recursive: true }))
-        cmds.push(`echo "重启脚本..."`)
-        const restartScript = fs.existsSync(path.join(repoRoot, 'scripts', 'restart-bot.sh'))
-          ? path.join(repoRoot, 'scripts', 'restart-bot.sh')
-          : path.join(repoRoot, 'restart-bot.sh')
-        cmds.push(scpCommand(restartScript, scpRemoteTarget(s, remoteJoin(d, 'restart.sh'))))
-        if (fs.existsSync(path.join(repoRoot, 'scripts', 'watchdog.sh'))) cmds.push(scpCommand(path.join(repoRoot, 'scripts', 'watchdog.sh'), scpRemoteTarget(s, remoteJoin(scriptsDir, 'watchdog.sh'))))
-        if (fs.existsSync(path.join(DATA_DIR, 'bilibili-cookies.txt'))) cmds.push(scpCommand(path.join(DATA_DIR, 'bilibili-cookies.txt'), scpRemoteTarget(s, '/root/bilibili-cookies.txt')))
-        cmds.push(`echo "重启 Bot..."`)
-        cmds.push(sshCommand(s, `bash ${shellQuote(remoteJoin(d, 'restart.sh'))}`))
-        cmds.push(sshCommand(s, `if ss -tlnp | grep -q :5140 || curl -fsS http://127.0.0.1:5140 >/dev/null; then exit 0; fi; echo ${shellQuote('health check failed; last koishi.log lines:')}; tail -30 ${shellQuote(remoteJoin(d, 'koishi.log'))}; exit 1`))
-        cmds.push(`echo "✅ 部署完成"`)
-
-        let idx = 0
-        function runNext() {
-          if (idx >= cmds.length) {
-            try { writeDeployFingerprint(DEPLOY_CONFIG_FILE, { server: s, appDir: d, mode: cfg.mode }) }
-            catch (e) { log('warning: deploy fingerprint write failed: ' + e.message) }
-            log('DONE')
+        log('开始远程刷新部署：先重建当前 Dashboard 后端机器上的前端源码')
+        buildFrontendDist({
+          log,
+          updateStatus: status => { rebuildStatus = status },
+        }, (buildErr) => {
+          if (buildErr) {
+            log('❌ 前端构建失败，已停止远程部署：' + buildErr.message)
+            log('FAIL')
             return
           }
-          log('$ ' + cmds[idx])
-          exec(cmds[idx], { cwd: repoRoot, timeout: 60000 }, (err, stdout, stderr) => {
-            if (stdout) log(stdout.trim())
-            if (stderr) log(stderr.trim())
-            if (err) { log('❌ ' + err.message); log('FAIL'); return }
-            idx++; runNext()
-          })
-        }
-        runNext()
+
+          const repoRoot = path.join(PLUGIN_ROOT, '..', '..')
+          const s = cfg.server
+          const d = cfg.appDir
+          const pkgs = [
+            'koishi-plugin-dongxuelian-ai', 'koishi-plugin-dongxuelian-help',
+            'koishi-plugin-group-name-at', 'koishi-plugin-defense',
+            'koishi-plugin-local-video-sender', 'koishi-plugin-group-leave-notice',
+            'koishi-plugin-dongxuelian-poke', 'koishi-plugin-daily-report',
+          ]
+          const cmds = []
+          const dashboardDir = remoteJoin(d, 'packages', 'koishi-plugin-dashboard')
+          const dashboardFrontendDir = remoteJoin(dashboardDir, 'frontend')
+          const dashboardSrcDir = remoteJoin(dashboardFrontendDir, 'src')
+          const dashboardSrcNextDir = remoteJoin(dashboardFrontendDir, 'src.next')
+          const dashboardPublicDir = remoteJoin(dashboardFrontendDir, 'public')
+          const dashboardPublicNextDir = remoteJoin(dashboardFrontendDir, 'public.next')
+          const dashboardDistDir = remoteJoin(dashboardFrontendDir, 'dist')
+          const dashboardDistNextDir = remoteJoin(dashboardFrontendDir, 'dist.next')
+          const scriptsDir = remoteJoin(d, 'scripts')
+          const dataDir = remoteJoin(d, 'data')
+          const existingInstallCheck = `test -f ${shellQuote(remoteJoin(d, 'node_modules', 'koishi', 'bin.js'))} && (test -f ${shellQuote(remoteJoin(d, 'koishi.config.js'))} || test -f ${shellQuote(remoteJoin(d, 'koishi.yml'))})`
+          cmds.push(`echo "preflight"`)
+          cmds.push(sshCommand(s, existingInstallCheck))
+          cmds.push(`echo "prepare dirs"`)
+          cmds.push(sshCommand(s, `mkdir -p ${[dataDir, dashboardDir, dashboardFrontendDir, scriptsDir].concat(pkgs.map(pkg => remoteJoin(d, 'node_modules', pkg, 'lib'))).map(shellQuote).join(' ')}`))
+          for (const pkg of pkgs) {
+            cmds.push(`echo "→ ${pkg}"`)
+            cmds.push(scpCommand(path.join(repoRoot, 'packages', pkg, 'lib'), scpRemoteTarget(s, remoteJoin(d, 'node_modules', pkg)), { recursive: true }))
+            cmds.push(scpCommand(path.join(repoRoot, 'packages', pkg, 'package.json'), scpRemoteTarget(s, remoteJoin(d, 'node_modules', pkg, 'package.json'))))
+          }
+          cmds.push(`echo "Dashboard 后端和前端源码..."`)
+          cmds.push(scpCommand(path.join(PLUGIN_ROOT, 'standalone.js'), scpRemoteTarget(s, remoteJoin(dashboardDir, 'standalone.js'))))
+          for (const name of ['index.html', 'package.json', 'package-lock.json', 'vite.config.js']) {
+            const localFile = path.join(FE_DIR, name)
+            if (fs.existsSync(localFile)) cmds.push(scpCommand(localFile, scpRemoteTarget(s, remoteJoin(dashboardFrontendDir, name))))
+          }
+          cmds.push(sshCommand(s, `rm -rf ${shellQuote(dashboardSrcNextDir)}`))
+          cmds.push(scpCommand(path.join(FE_DIR, 'src'), scpRemoteTarget(s, dashboardSrcNextDir), { recursive: true }))
+          cmds.push(sshCommand(s, `rm -rf ${shellQuote(dashboardSrcDir)} && mv ${shellQuote(dashboardSrcNextDir)} ${shellQuote(dashboardSrcDir)}`))
+          if (fs.existsSync(path.join(FE_DIR, 'public'))) {
+            cmds.push(sshCommand(s, `rm -rf ${shellQuote(dashboardPublicNextDir)}`))
+            cmds.push(scpCommand(path.join(FE_DIR, 'public'), scpRemoteTarget(s, dashboardPublicNextDir), { recursive: true }))
+            cmds.push(sshCommand(s, `rm -rf ${shellQuote(dashboardPublicDir)} && mv ${shellQuote(dashboardPublicNextDir)} ${shellQuote(dashboardPublicDir)}`))
+          } else {
+            cmds.push(sshCommand(s, `rm -rf ${shellQuote(dashboardPublicDir)} ${shellQuote(dashboardPublicNextDir)}`))
+          }
+          cmds.push(`echo "Dashboard 前端 dist..."`)
+          cmds.push(sshCommand(s, `rm -rf ${shellQuote(dashboardDistNextDir)}`))
+          cmds.push(scpCommand(DIST_DIR, scpRemoteTarget(s, dashboardDistNextDir), { recursive: true }))
+          cmds.push(sshCommand(s, `test -f ${shellQuote(remoteJoin(dashboardDistNextDir, 'index.html'))} && ls ${shellQuote(remoteJoin(dashboardDistNextDir, 'assets'))}/*.js >/dev/null 2>&1 && rm -rf ${shellQuote(dashboardDistDir)} && mv ${shellQuote(dashboardDistNextDir)} ${shellQuote(dashboardDistDir)}`))
+          cmds.push(`echo "重启脚本..."`)
+          const restartScript = fs.existsSync(path.join(repoRoot, 'scripts', 'restart-bot.sh'))
+            ? path.join(repoRoot, 'scripts', 'restart-bot.sh')
+            : path.join(repoRoot, 'restart-bot.sh')
+          cmds.push(scpCommand(restartScript, scpRemoteTarget(s, remoteJoin(d, 'restart.sh'))))
+          if (fs.existsSync(path.join(repoRoot, 'scripts', 'watchdog.sh'))) cmds.push(scpCommand(path.join(repoRoot, 'scripts', 'watchdog.sh'), scpRemoteTarget(s, remoteJoin(scriptsDir, 'watchdog.sh'))))
+          if (fs.existsSync(path.join(DATA_DIR, 'bilibili-cookies.txt'))) cmds.push(scpCommand(path.join(DATA_DIR, 'bilibili-cookies.txt'), scpRemoteTarget(s, '/root/bilibili-cookies.txt')))
+          cmds.push(`echo "重启 Bot..."`)
+          cmds.push(sshCommand(s, `bash ${shellQuote(remoteJoin(d, 'restart.sh'))}`))
+          cmds.push(sshCommand(s, `if ss -tlnp | grep -q :5140 || curl -fsS http://127.0.0.1:5140 >/dev/null; then exit 0; fi; echo ${shellQuote('health check failed; last koishi.log lines:')}; tail -30 ${shellQuote(remoteJoin(d, 'koishi.log'))}; exit 1`))
+          cmds.push(`echo "✅ 部署完成"`)
+
+          let idx = 0
+          function runNext() {
+            if (idx >= cmds.length) {
+              try { writeDeployFingerprint(DEPLOY_CONFIG_FILE, { server: s, appDir: d, mode: cfg.mode }) }
+              catch (e) { log('warning: deploy fingerprint write failed: ' + e.message) }
+              log('DONE')
+              return
+            }
+            log('$ ' + cmds[idx])
+            exec(cmds[idx], { cwd: repoRoot, timeout: 120000 }, (err, stdout, stderr) => {
+              if (stdout) log(stdout.trim())
+              if (stderr) log(stderr.trim())
+              if (err) { log('❌ ' + err.message); log('FAIL'); return }
+              idx++; runNext()
+            })
+          }
+          runNext()
+        })
       } catch (e) { json(res, { ok: false, message: e.message }, 400) }
     })
     return
@@ -3344,41 +3453,13 @@ const server = http.createServer((req, res) => {
     if (rebuildStatus.state === 'building') {
       return json(res, { ok: false, message: '正在构建中，请等待完成' })
     }
-    const FE_DIR = path.join(PLUGIN_ROOT, 'frontend')
-    if (!fs.existsSync(path.join(FE_DIR, 'node_modules'))) {
-      return json(res, { ok: false, message: '前端依赖未安装，请先在 frontend 目录执行 npm install' })
-    }
-    const distDir = path.join(FE_DIR, 'dist')
-    const backupDir = path.join(FE_DIR, 'dist.bak')
-    try {
-      fs.rmSync(backupDir, { recursive: true, force: true })
-      if (fs.existsSync(distDir)) fs.renameSync(distDir, backupDir)
-    } catch (e) {
-      return json(res, { ok: false, message: 'frontend backup failed: ' + e.message }, 500)
-    }
-    rebuildStatus = { state: 'building', message: 'building', detail: '', startedAt: Date.now(), finishedAt: 0 }
-    exec('npm run build', { cwd: FE_DIR, timeout: 120000 }, (err, stdout, stderr) => {
-      try {
-        if (err) {
-          const rollbackError = rollbackFrontendDist(distDir, backupDir)
-          const detail = [stderr || err.message || '', rollbackError].filter(Boolean).join('\n').slice(-600)
-          rebuildStatus = { state: 'failed', message: 'frontend build failed and rolled back', detail, startedAt: rebuildStatus.startedAt, finishedAt: Date.now() }
-          log('frontend rebuild failed: ' + detail)
-          return
-        }
-        if (!hasFrontendDistAssets(distDir)) {
-          const rollbackError = rollbackFrontendDist(distDir, backupDir)
-          rebuildStatus = { state: 'failed', message: 'frontend dist is incomplete and rolled back', detail: rollbackError, startedAt: rebuildStatus.startedAt, finishedAt: Date.now() }
-          return
-        }
-        fs.rmSync(backupDir, { recursive: true, force: true })
-        rebuildStatus = { state: 'success', message: 'frontend build success', detail: '', startedAt: rebuildStatus.startedAt, finishedAt: Date.now() }
-        log('frontend rebuild success')
-      } catch (e) {
-        rebuildStatus = { state: 'failed', message: 'frontend rebuild cleanup failed', detail: e.message, startedAt: rebuildStatus.startedAt, finishedAt: Date.now() }
-        log('frontend rebuild cleanup failed: ' + e.message)
-      }
+    const started = buildFrontendDist({
+      log: msg => log('frontend rebuild: ' + msg),
+      updateStatus: status => { rebuildStatus = status },
+    }, (err) => {
+      if (err) log('frontend rebuild failed: ' + err.message)
     })
+    if (!started) return json(res, { ok: false, message: rebuildStatus.detail || '前端构建启动失败' }, 500)
     return json(res, { ok: true, message: '前端构建已启动' })
   }
 
