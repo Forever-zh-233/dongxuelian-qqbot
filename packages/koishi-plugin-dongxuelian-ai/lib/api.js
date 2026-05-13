@@ -55,7 +55,7 @@ function rebuildFallbackExtraBody(extraBody = {}, config = {}) {
   return next
 }
 
-async function requestChatCompletions(messages, config, extraBody = {}) {
+async function requestChatCompletions(messages, config, extraBody = {}, tools = null) {
   const fallbackSet = extraBody._fallbackSet || 'chat'
   if (!config._originalConfig && !config._fallbackTried) {
     config._originalConfig = { model: config.model, provider: config.provider, baseURL: config.baseURL, apiKey: config.apiKey }
@@ -78,6 +78,7 @@ async function requestChatCompletions(messages, config, extraBody = {}) {
           model: config.model, temperature: 0.9, max_tokens: maxTokens,
           ...(isDashScopeConfig(config) ? { enable_thinking: false } : {}),
           ...filteredExtraBody, messages,
+          ...(tools && Array.isArray(tools) && tools.length ? { tools, tool_choice: 'auto' } : {}),
         }),
       })
     } finally { clearTimeout(timer) }
@@ -85,7 +86,7 @@ async function requestChatCompletions(messages, config, extraBody = {}) {
       if (response.status === 429 || response.status === 401 || response.status === 400) {
         const fbStep = (config._fallbackTried || 0) + 1
         const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)
-        if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig))
+        if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig), tools)
       }
       const text = await response.text().catch(() => '')
       const isFallback = (response.status === 429 || response.status === 401) && config._fallbackTried
@@ -93,6 +94,12 @@ async function requestChatCompletions(messages, config, extraBody = {}) {
     }
     const data = await response.json()
     const m = data?.choices?.[0]?.message || {}
+
+    // tool_calls 必须在 content 判空之前检查
+    if (tools && m.tool_calls && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+      return { type: 'tool_calls', tool_calls: m.tool_calls, message: m }
+    }
+
     let content = m.content && m.content.trim() ? m.content : ''
     if (!content && m.reasoning_content) {
       console.warn('[dongxuelian-ai] reasoning-only model response dropped')
@@ -282,7 +289,7 @@ function callGetForwardMsg(forwardId) {
     { id: forwardId },
     'gf',
     10000,
-    message => (message.data ? (message.data.messages || message.data.message || (Array.isArray(message.data) ? message.data : null)) : null)
+    message => message.data ? (message.data.messages || message.data.message || (Array.isArray(message.data) ? message.data : null)) : null
   )
 }
 
