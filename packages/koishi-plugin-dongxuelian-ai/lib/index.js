@@ -39,92 +39,6 @@ const {
   checkPlatformMuteStatus,
 } = require('./send-guard')
 
-// ===== @satorijs/core@3.7.0 兼容补丁：Session 缺失方法 =====
-function __patchBuildStripped(session) {
-  if (session._stripped && typeof session._stripped === 'object') return session._stripped
-  const source = Array.isArray(session.elements) ? session.elements : Array.isArray(session.event?.message?.elements) ? session.event.message.elements : []
-  const elements = source.slice()
-  let hasAt = false
-  let appel = false
-  let atSelf = false
-  const selfId = String(session.selfId || session.bot?.selfId || session.event?.selfId || '')
-  const quoteUserId = String(session.quote?.user?.id || '')
-  while (elements[0]?.type === 'at') {
-    const id = String(elements.shift()?.attrs?.id || '')
-    if (selfId && id === selfId) { atSelf = true; appel = true }
-    if (!quoteUserId || id !== quoteUserId) hasAt = true
-    while (elements[0]?.type === 'text' && !String(elements[0].attrs?.content || '').trim()) { elements.shift() }
-  }
-  let content = elements.map(function(element) {
-    if (!element) return ''
-    if (element.type === 'text') return String(element.attrs?.content || '')
-    if (element.type === 'at') {
-      const id = element.attrs?.id || ''
-      return id ? '<at id="' + id + '"/>' : ''
-    }
-    return ''
-  }).join('').trim()
-  if (!hasAt) {
-    const nicknames = session?.app?.koishi?.config?.nickname || session?.app?.config?.nickname || []
-    const list = Array.isArray(nicknames) ? nicknames : [nicknames]
-    let val = content
-    if (val.startsWith('@')) val = val.slice(1)
-    for (let index = 0; index < list.length; index++) {
-      const name = String(list[index] || '')
-      if (!name || !val.startsWith(name)) continue
-      const rest = val.slice(name.length)
-      const match = /^([,\uFF0C\u3001\s]+|$)/.exec(rest)
-      if (!match) continue
-      appel = true; content = rest.slice(match[0].length).trim(); break
-    }
-  }
-  session._stripped = { hasAt: hasAt, content: content, appel: appel, atSelf: atSelf, prefix: null }
-  return session._stripped
-}
-
-function __patchInstallAccessors(target) {
-  if (!target || target.__dongxuelianStrippedPatch) return
-  Object.defineProperty(target, 'stripped', { configurable: true, enumerable: false,
-    get: function() { return __patchBuildStripped(this) },
-    set: function(v) { if (v && typeof v === 'object') this._stripped = v; else if (v === undefined) this._stripped = undefined }
-  })
-  Object.defineProperty(target, 'parsed', { configurable: true, enumerable: false,
-    get: function() { return this.stripped }, set: function(v) { this.stripped = v }
-  })
-  Object.defineProperty(target, '__dongxuelianStrippedPatch', { value: true, configurable: true, enumerable: false })
-}
-
-// 安装到 Session 原型
-__patchInstallAccessors(KoishiSession && KoishiSession.prototype)
-
-// 包装 Bot.prototype.session()
-const __origSession = KoishiBot.prototype.session
-if (!__origSession.__dongxuelianPatched) {
-  KoishiBot.prototype.session = function(event) {
-    const session = __origSession.call(this, event)
-    if (!session || typeof session !== 'object') return session
-    try { if (session.stripped !== undefined) return session } catch (error) {}
-    __patchInstallAccessors(session)
-    return session
-  }
-  KoishiBot.prototype.session.__dongxuelianPatched = true
-}
-
-// Resolve
-if (!KoishiSession.prototype.resolve) {
-  KoishiSession.prototype.resolve = function(value) {
-    if (typeof value === 'function') return value(this)
-    return value
-  }
-}
-
-// Send（需 h.normalize 解析 CQ 码）
-if (!KoishiSession.prototype.send) {
-  KoishiSession.prototype.send = async function(content) {
-    if (!this.bot || typeof this.bot.sendMessage !== 'function') throw new Error('Bot not available for sending')
-    return this.bot.sendMessage(this.channelId, require('koishi').h.normalize(content), this.guildId)
-  }
-}
 
 const {
   resetPoliticalDetectCache,
@@ -314,7 +228,7 @@ if (KoishiSession && KoishiSession.prototype && !KoishiSession.prototype.send) {
     if (!this.bot || typeof this.bot.sendMessage !== 'function') {
       throw new Error('Bot not available for sending')
     }
-    return this.bot.sendMessage(this.channelId, content, this.guildId)
+    return this.bot.sendMessage(this.channelId, require('koishi').h.normalize(content), this.guildId)
   }
 }
 

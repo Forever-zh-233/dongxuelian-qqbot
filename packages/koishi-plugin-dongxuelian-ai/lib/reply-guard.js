@@ -24,7 +24,7 @@ function shouldRetryRepeatedReply(session, reply = '') {
   if (!reply) return false
   if (isOverusedReply(reply)) return true
   const recentFingerprints = getReplyFingerprintHistory(session)
-  return recentFingerprints.some(prev => isReplyTooSimilar(reply, prev))
+  return recentFingerprints.some(prev => isReplyTooSimilar(reply, prev.content))
 }
 
 function buildRepeatRetryPrompt(userText, recentReplies = []) {

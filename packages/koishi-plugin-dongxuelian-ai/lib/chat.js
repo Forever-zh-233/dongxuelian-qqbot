@@ -77,6 +77,18 @@ let skillsCache = []
 let skillsContentCache = {}
 const lastMemoryPromptTs = new Map()
 const hostileLevelCache = new Map()
+let lastCacheCleanupTs = 0
+
+function trimRuntimeCaches(now = Date.now()) {
+  if (now - lastCacheCleanupTs < 300000) return
+  lastCacheCleanupTs = now
+  for (const [key, ts] of lastMemoryPromptTs.entries()) {
+    if (now - ts > 300000) lastMemoryPromptTs.delete(key)
+  }
+  for (const [key, entry] of hostileLevelCache.entries()) {
+    if (!entry || entry.expireAt <= now) hostileLevelCache.delete(key)
+  }
+}
 
 function shouldInjectLore(userText = '') {
   for (const keyword of LORE_TRIGGER_SET) {
@@ -309,6 +321,7 @@ async function chatJailbreak(session, userText, ctx) {
 // FUNCTION SIZE GATE: 该函数当前约 350 行。上限 400 行。
 // 触发线：新增逻辑超过 10 行 / 新增状态超过 2 个 key → 先提出拆分方案。
 async function chat(session, userText, ctx, options = {}) {
+  trimRuntimeCaches()
   const cleanInput = sanitizeUserInput(userText)
   const rareProvocation = isRareProvocation(cleanInput)
   const japanLinked = JAPAN_SELF_IDENTIFY_RE.test(cleanInput)
@@ -344,7 +357,7 @@ async function chat(session, userText, ctx, options = {}) {
     const text = cleanInput.replace(/^(?:记住|记下)\s+/, '').trim()
     if (text) {
       writeMemory(currentUserId, '', channelKey, text)
-      return
+      return '嗯，我记住了'
     }
   }
 

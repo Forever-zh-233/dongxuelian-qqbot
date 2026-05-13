@@ -36,6 +36,15 @@ const { logDebug } = require('./logging-config')
 const forgetPendingConfirm = new Map()
 const EMOTION_IMAGE_TEXT_LIMIT = 1500
 const EMOTION_FALLBACK_TEXT_LIMIT = 500
+let lastForgetCleanupTs = 0
+
+function trimForgetPendingConfirm(now = Date.now()) {
+  if (now - lastForgetCleanupTs < 300000) return
+  lastForgetCleanupTs = now
+  for (const [key, ts] of forgetPendingConfirm.entries()) {
+    if (now - ts > 300000) forgetPendingConfirm.delete(key)
+  }
+}
 
 function isGroupAdmin(session) {
   if (!session?.event?.sender?.role) return false
@@ -250,6 +259,8 @@ async function handleCommand(session, ctx, state) {
     channelMissCount, repeatEnabledCache, channelTodayCache, lastEmotionCache,
   } = state
 
+  trimForgetPendingConfirm()
+
   if (/^(?:东雪莲)?测试开$/.test(plain)) {
     try { require('fs').writeFileSync(TEST_MODE_FILE, 'on') } catch (e) { ctx.logger('dongxuelian-ai').warn(`test mode enable failed: ${e.message}`) }
     clearConversationHistory()
@@ -308,8 +319,9 @@ async function handleCommand(session, ctx, state) {
     return handled(reply)
   }
 
-  if (/^定位消息\s+(\d+)$/.test(plain)) {
-    const targetIdx = parseInt(RegExp.$1, 10) - 1
+  const locateMatch = plain.match(/^定位消息\s+(\d+)$/)
+  if (locateMatch) {
+    const targetIdx = parseInt(locateMatch[1], 10) - 1
     if (!inGuild) return handled('这个命令只能在群里用。')
     const today = todayCst()
     const safeKey = String(channelKey).replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -330,11 +342,11 @@ async function handleCommand(session, ctx, state) {
     if (cacheIdx === -1) return handled('未找到该消息。')
     const start = Math.max(0, cacheIdx - 2)
     const end = Math.min(cache.messages.length, cacheIdx + 3)
-    const ctx = cache.messages.slice(start, end).map((m, i) => {
+    const contextLines = cache.messages.slice(start, end).map((m, i) => {
       const prefix = start + i === cacheIdx ? '→ ' : '  '
       return `${prefix}${m.user || '群友'} ${m.time ? m.time.slice(0, 5) : ''}：${(m.content || '').replace(/【[^】]*】/g, '').trim().slice(0, 80)}`
     }).join('\n')
-    return handled(`消息上下文（共${cache.messages.length}条）：\n\n${ctx}`)
+    return handled(`消息上下文（共${cache.messages.length}条）：\n\n${contextLines}`)
   }
 
   if (/^东雪莲群聊AI概率查看$/.test(plain)) {
@@ -450,7 +462,7 @@ async function handleCommand(session, ctx, state) {
   if (plain.startsWith('东雪莲群记忆定时') && plain !== '东雪莲群记忆定时') {
     if (!isGroupAdminOrBotAdmin(session)) return handled('只有群管理员/群主才能设置。')
     if (!inGuild) return handled('这个命令只能在群里用。')
-    const value = plain.slice(7).trim()
+    const value = plain.slice(8).trim()
     if (value === '关') {
       try { await safeUnlink(path.join(DATA_DIR, 'memory-timers', String(channelKey).replace(/[^a-zA-Z0-9._-]/g, '_') + '.json')) } catch {}
       return handled('群记忆定时清空已关闭。')
