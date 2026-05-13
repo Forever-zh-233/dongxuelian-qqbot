@@ -377,17 +377,17 @@ select option { background: var(--surface); color: var(--text) }
 .themed-scrollbar::-webkit-scrollbar-corner { background: var(--input) }
 
 .btn {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  color: var(--text); border: 1px solid color-mix(in srgb, var(--border) 52%, rgba(255,255,255,0.08)); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text); border: 1px solid color-mix(in srgb, var(--border) 40%, rgba(255,255,255,0.04)); border-radius: var(--radius-md);
   padding: 8px 20px; font-weight: 700; font-size: 14px;
   cursor: pointer;
-  box-shadow: 0 8px 28px color-mix(in srgb, var(--shadow) 58%, transparent), inset 0 1px 0 rgba(255,255,255,0.08);
-  backdrop-filter: blur(7px) saturate(1.28);
-  -webkit-backdrop-filter: blur(7px) saturate(1.28);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--shadow) 40%, transparent), inset 0 1px 0 rgba(255,255,255,0.06);
+  backdrop-filter: blur(12px) saturate(1.06);
+  -webkit-backdrop-filter: blur(12px) saturate(1.06);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.btn:hover { transform: translateY(-2px); box-shadow: 0 10px 32px color-mix(in srgb, var(--shadow) 68%, transparent), inset 0 1px 0 rgba(255,255,255,0.1) }
-.btn:active { transform: translateY(0); box-shadow: 0 2px 8px color-mix(in srgb, var(--shadow) 55%, transparent) }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px color-mix(in srgb, var(--shadow) 50%, transparent), inset 0 1px 0 rgba(255,255,255,0.08) }
+.btn:active { transform: translateY(0); box-shadow: 0 1px 6px color-mix(in srgb, var(--shadow) 35%, transparent) }
 .btn-sm { padding: 4px 12px; font-size: 12px }
 
 /* Tab 按钮 */
@@ -643,9 +643,9 @@ select option { background: var(--surface); color: var(--text) }
 }
 
 .btn-ghost {
-  background: var(--input);
+  background: transparent;
   color: var(--text2);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
 }
 
 .btn-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--border)) }
@@ -1851,6 +1851,18 @@ label.uninstall-row { cursor: pointer }
   .local-wizard-layout { grid-template-columns: 1fr }
   .ready-panel { flex-direction: column; align-items: stretch }
   .ready-links { justify-content: flex-start }
+  .theme-modal {
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .theme-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .modal-backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 @media (max-width: 640px) {

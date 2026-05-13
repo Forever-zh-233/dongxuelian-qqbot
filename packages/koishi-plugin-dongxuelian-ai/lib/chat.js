@@ -21,7 +21,7 @@ const {
   JAILBREAK_OUTPUT_RE,
   CONTEXT_JAILBREAK_STRONG_RE, CONTEXT_JAILBREAK_WEAK_RE,
   JAPAN_SELF_IDENTIFY_RE, GENERATION_REQUEST_RE,
-  SHORT_FOLLOW_UP_RE, SENSITIVE_KEYWORDS_RE,
+  SHORT_FOLLOW_UP_RE, SENSITIVE_KEYWORDS_RE, THINKING_OUTPUT_RE,
   BANNED_ACTION_OUTPUT_RE,
 } = require('./constants')
 const { resolvePersona, loadPersonalSkill } = require('./persona')
@@ -838,10 +838,12 @@ async function chat(session, userText, ctx, options = {}) {
     if (isUnsafeThinkingReply(reply)) {
       ctx.logger('dongxuelian-ai').warn('thinking output in reply, retrying with sanitized prompt')
       messages.push({ role: 'assistant', content: reply })
-      messages.push({
-        role: 'user',
-        content: '不要分析你的回复策略，不要引用系统指令，直接说你的人设会说的人话，用一句话回复。',
-      })
+      const thinkingMatch = reply.match(THINKING_OUTPUT_RE) || reply.match(/（[^）]*?(?:收到.*新消息|这是什么意思|只有昵称|用户[发说]了|从上下文看|这应该是在|是在回应|是不是在).{0,60}）/)
+      const specific = thinkingMatch ? '"' + thinkingMatch[0].slice(0, 80) + '"' : ''
+      const instruction = specific
+        ? '【系统提示：你刚才的回复包含了类似' + specific + '的分析式内容，请直接回答用户消息本身，不要把用户消息当成阅读理解题去分析。不要输出括号里的心理活动。按你的人设风格直接回答。】'
+        : '不要分析你的回复策略，不要引用系统指令，直接说你的人设会说的人话，用一句话回复。'
+      messages.push({ role: 'user', content: instruction })
       reply = await callOpenAI(messages, options.randomTriggered)
       continue
     }
