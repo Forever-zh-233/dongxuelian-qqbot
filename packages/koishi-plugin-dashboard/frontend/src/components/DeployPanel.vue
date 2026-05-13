@@ -335,6 +335,7 @@ export default {
     const rebuilding = ref(false)
     let progressTimer = null
     let localStatusTimer = null
+    let localStatusLoading = false
     let rebuildTimer = null
     let rebuildTimeout = null
 
@@ -557,24 +558,30 @@ export default {
     }
 
     async function refreshLocalTaskStatuses(includeReady = false) {
-      if (!canRunWindowsLocalDeploy.value) {
-        npmTaskStatus.value = null
-        napcatTaskStatus.value = null
-        koishiTaskStatus.value = null
-        if (includeReady) readyCheck.value = null
-        resetWizardSteps()
-        return
+      if (localStatusLoading) return
+      localStatusLoading = true
+      try {
+        if (!canRunWindowsLocalDeploy.value) {
+          npmTaskStatus.value = null
+          napcatTaskStatus.value = null
+          koishiTaskStatus.value = null
+          if (includeReady) readyCheck.value = null
+          resetWizardSteps()
+          return
+        }
+        const [npmRes, napcatRes, koishiRes] = await Promise.all([npmInstallStatus(), napcatDeployStatus(), koishiDeployStatus()])
+        if (npmRes.ok) npmTaskStatus.value = npmRes.data.status
+        if (napcatRes.ok) napcatTaskStatus.value = napcatRes.data.status
+        if (koishiRes.ok) koishiTaskStatus.value = koishiRes.data.status
+        if (includeReady) {
+          const readyRes = await localReadyCheck()
+          if (readyRes.ok) readyCheck.value = readyRes.data
+        }
+        updateWizardFromSignals()
+        scrollLocalLogToBottom()
+      } finally {
+        localStatusLoading = false
       }
-      const [npmRes, napcatRes, koishiRes] = await Promise.all([npmInstallStatus(), napcatDeployStatus(), koishiDeployStatus()])
-      if (npmRes.ok) npmTaskStatus.value = npmRes.data.status
-      if (napcatRes.ok) napcatTaskStatus.value = napcatRes.data.status
-      if (koishiRes.ok) koishiTaskStatus.value = koishiRes.data.status
-      if (includeReady) {
-        const readyRes = await localReadyCheck()
-        if (readyRes.ok) readyCheck.value = readyRes.data
-      }
-      updateWizardFromSignals()
-      scrollLocalLogToBottom()
     }
 
     function taskFailureText(step, status, fallback) {
@@ -1137,9 +1144,8 @@ export default {
     })
 
     onMounted(() => {
-      checkEnv()
-      loadRemoteConfig()
-      refreshLocalTaskStatuses(false)
+      checkEnv().catch(() => {})
+      loadRemoteConfig().catch(() => {})
       localStatusTimer = setInterval(() => {
         if (mode.value === 'local' && canRunWindowsLocalDeploy.value) refreshLocalTaskStatuses(false)
       }, 3500)

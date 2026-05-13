@@ -30,6 +30,7 @@ const {
   readJsonFile, writeJsonFile, writeTextFile, safeUnlink,
   formatPercent, getModelDisplayName, getSearchCapability, formatSearchStatus,
   extractAtIds, todayCst, todayCstMinusDays,
+  sanitizeUserName,
 } = require('./utils')
 const { logDebug } = require('./logging-config')
 
@@ -712,6 +713,72 @@ async function handleCommand(session, ctx, state) {
     } catch (err) {
       ctx.logger('dongxuelian-ai').warn(`emotion analysis failed: ${err.message}`)
       return handled('情绪分析失败了，稍后再试。')
+    }
+  }
+
+  // === Agent 工具模式管理 ===
+  if (/^(?:东雪莲)?工具模式\s+(auto|confirm|block|config)$/.test(plain)) {
+    if (!hasAdminPermission(session)) return handled('只有管理员能操作此命令。')
+    const m = RegExp.$1
+    require('./agent/safety').setMode(m)
+    const labels = { auto: '自动执行', confirm: '需确认', block: '已禁止', config: '跟随配置' }
+    return handled(`工具安全模式：${labels[m]} (${m})`)
+  }
+
+  if (/^(?:东雪莲)?工具状态$/.test(plain)) {
+    const safety = require('./agent/safety')
+    const agentConfig = require('./agent/config').getAgentConfig()
+    const stats = require('./agent/stats').getStats()
+    const registry = require('./agent/tools/registry')
+    const qqTools = registry.getToolDefinitions('qq').map(item => item.function.name).join(', ') || '无'
+    const dashboardTools = registry.getToolDefinitions('dashboard').map(item => item.function.name).join(', ') || '无'
+    return handled([
+      `工具安全模式：${safety.getMode()}（危险工具策略：${agentConfig.dangerousPolicy}）`,
+      `QQ Agent：${agentConfig.channels.qq.enabled ? '开启' : '关闭'} / ${qqTools}`,
+      `Dashboard Agent：${agentConfig.channels.dashboard.enabled ? '开启' : '关闭'} / ${dashboardTools}`,
+      `可注册工具：${registry.getToolCount()} 个`,
+      `累计调用：${stats.total} 次`,
+      stats.total > 0 ? `最近：${stats.recent.slice(0, 3).map(c => c.tool).join(', ')}` : '',
+    ].filter(Boolean).join('\n'))
+  }
+
+  // === Agent 对话命令 ===
+  const agentMatch = plain.match(/^莲莲\s*(?:工具|agent)\s+(.+)/i)
+  if (agentMatch && !adminCommandMatched) {
+    const query = agentMatch[1].trim()
+    const engine = require('./agent/engine')
+    const userName = sanitizeUserName(
+      session.author?.nick || session.author?.name || session.username || '群友'
+    )
+    try {
+      const result = await engine.run({
+        userMessage: query, userName, userId: currentUserId, channelKey, channel: 'qq',
+        onProgress: (msg) => {
+          if (msg.type === 'round' && msg.round === 0) {
+            // 首轮执行中，不额外输出
+          }
+        },
+      })
+      return handled(result.reply || '(Agent 未获取有效回复)')
+    } catch (err) {
+      ctx.logger('dongxuelian-ai').warn(`agent engine failed: ${err.message}`)
+      return handled('Agent 暂时不可用。')
+    }
+  }
+
+  // === Agent 待确认处理 ===
+  if (plain === '确认工具' || plain === 'y' || plain === 'Y') {
+    const pending = require('./agent/pending')
+    const registry = require('./agent/tools/registry')
+    const p = pending.getPendingTool(channelKey, currentUserId)
+    if (p) {
+      pending.clearPendingTool(channelKey, currentUserId)
+      try {
+        const result = await registry.executeTool(p.toolName, p.args || {})
+        return handled(`已执行 ${p.toolName}：\n${result.slice(0, 500)}`)
+      } catch (err) {
+        return handled(`执行失败：${err.message}`)
+      }
     }
   }
 

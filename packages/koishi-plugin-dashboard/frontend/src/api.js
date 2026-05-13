@@ -203,6 +203,9 @@ export async function fetchLogs(params = {}) {
 }
 export async function fetchLoggingConfig() { return get('/logging') }
 export async function saveLoggingConfig(data) { return put('/logging', data, true) }
+export async function fetchAgentConfig() { return get('/agent/config') }
+export async function saveAgentConfig(data) { return put('/agent/config', data, true) }
+export async function sendAgentMessage(message) { return post('/agent/chat', { message }, true, 60000) }
 export async function fetchGalleryImages() { return get('/gallery') }
 export async function uploadGalleryImage(data) { return post('/gallery', data, false, 60000) }
 export async function deleteGalleryImage(idOrIds) { return del('/gallery', Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds }, true) }

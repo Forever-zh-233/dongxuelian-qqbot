@@ -3132,6 +3132,61 @@ const server = http.createServer((req, res) => {
     return napcatProxy(req, res, pathname + url.search)
   }
 
+  // Agent 工具配置与控制台
+  if (pathname === '/dashboard/api/agent/config' && req.method === 'GET') {
+    try {
+      const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig(true)
+      const registry = require(path.join(AI_LIB, 'agent', 'tools', 'registry'))
+      const safety = require(path.join(AI_LIB, 'agent', 'safety'))
+      const stats = require(path.join(AI_LIB, 'agent', 'stats')).getStats()
+      const skills = require(path.join(AI_LIB, 'agent', 'skills')).listAgentSkills()
+      const tools = Object.values(registry.toolRegistry).map(tool => ({
+        name: tool.definition.name,
+        description: tool.definition.description || '',
+        dangerous: !!tool.dangerous,
+        defaultChannels: tool.defaultChannels || ['dashboard', 'qq'],
+        qqEnabled: registry.getToolDefinitions('qq').some(item => item.function.name === tool.definition.name),
+        dashboardEnabled: registry.getToolDefinitions('dashboard').some(item => item.function.name === tool.definition.name),
+      }))
+      return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/config' && req.method === 'PUT') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const agentConfig = require(path.join(AI_LIB, 'agent', 'config'))
+        const safety = require(path.join(AI_LIB, 'agent', 'safety'))
+        const saved = await agentConfig.saveAgentConfig(data.config || data)
+        if (data.mode) await safety.setMode(data.mode)
+        return json(res, { ok: true, config: saved, mode: safety.getMode(), message: 'Agent 配置已更新' })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/chat' && req.method === 'POST') {
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const message = String(data.message || '').trim()
+        if (!message) return json(res, { ok: false, message: '消息不能为空' }, 400)
+        const engine = require(path.join(AI_LIB, 'agent', 'engine'))
+        const result = await engine.run({
+          userMessage: message,
+          userName: String(data.userName || 'Dashboard'),
+          userId: 'dashboard',
+          channelKey: 'dashboard',
+          channel: 'dashboard',
+        })
+        return json(res, { ok: true, ...result })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })
+    return
+  }
+
   // Bot 控制
   if (pathname === '/dashboard/api/bot/status' && req.method === 'GET') {
     try {

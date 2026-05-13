@@ -433,6 +433,10 @@ async function main() {
   check('npm check includes AI vision syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/vision.js'))
   check('npm check includes AI sensitive syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/sensitive.js'))
   check('npm check includes AI health-check syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/health-check.js'))
+  check('npm check includes AI agent engine syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/engine.js'))
+  check('npm check includes AI agent config syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/config.js'))
+  check('npm check includes AI agent registry syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/registry.js'))
+  check('npm check includes AI agent tool syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/calculator.js'))
   check('npm check includes AI retaliation syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/retaliation.js'))
   check('npm check includes dashboard standalone syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dashboard/standalone.js'))
   checkEqual('npm start uses start.js', rootPkg.scripts && rootPkg.scripts.start, 'node start.js')
@@ -494,6 +498,21 @@ async function main() {
     retaliation: path.join(LIB, 'retaliation'),
     sendGuard: path.join(LIB, 'send-guard'),
     healthCheck: path.join(LIB, 'health-check'),
+    agentEngine: path.join(LIB, 'agent', 'engine'),
+    agentConfig: path.join(LIB, 'agent', 'config'),
+    agentContext: path.join(LIB, 'agent', 'context'),
+    agentSkills: path.join(LIB, 'agent', 'skills'),
+    agentStats: path.join(LIB, 'agent', 'stats'),
+    agentPending: path.join(LIB, 'agent', 'pending'),
+    agentSafety: path.join(LIB, 'agent', 'safety'),
+    agentToolRegistry: path.join(LIB, 'agent', 'tools', 'registry'),
+    agentToolTime: path.join(LIB, 'agent', 'tools', 'get-time'),
+    agentToolCalculator: path.join(LIB, 'agent', 'tools', 'calculator'),
+    agentToolWebSearch: path.join(LIB, 'agent', 'tools', 'web-search'),
+    agentToolReadFile: path.join(LIB, 'agent', 'tools', 'read-file'),
+    agentToolBrowserAction: path.join(LIB, 'agent', 'tools', 'browser-action'),
+    agentToolFindFiles: path.join(LIB, 'agent', 'tools', 'find-files'),
+    agentToolShell: path.join(LIB, 'agent', 'tools', 'shell'),
     index: path.join(LIB, 'index'),
     help: path.join(HELP, 'index'),
   }
@@ -602,6 +621,31 @@ async function main() {
       'sleepForRateLimitRetry', 'getSendChannelKey', 'getCachedPlatformMuteStatus',
       'markPlatformMute', 'clearPlatformMute', 'checkPlatformMuteStatus',
     ],
+    agentEngine: [
+      'run',
+    ],
+    agentConfig: [
+      'getAgentConfig', 'saveAgentConfig', 'patchAgentConfig', 'setChannelEnabled', 'setToolEnabled',
+      'isChannelEnabled', 'isToolEnabled', 'getReadFileRoots', 'getDangerousPolicy', 'resetAgentConfigCache',
+    ],
+    agentContext: [
+      'estimateTokens', 'truncateToolResult', 'buildContextReport', 'compactMessages',
+    ],
+    agentSkills: [
+      'listAgentSkills', 'parseFrontmatter',
+    ],
+    agentStats: [
+      'recordCall', 'getStats',
+    ],
+    agentPending: [
+      'getPendingTool', 'setPendingTool', 'clearPendingTool', 'trimPendingTools',
+    ],
+    agentSafety: [
+      'getMode', 'setMode', 'check',
+    ],
+    agentToolRegistry: [
+      'getToolDefinitions', 'executeTool', 'getToolCount',
+    ],
   }
   for (const [moduleName, names] of Object.entries(expectedExports)) {
     const target = modules[moduleName]
@@ -618,6 +662,12 @@ async function main() {
   check('jailbreak pattern groups exported', modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERN_GROUPS && typeof modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERN_GROUPS === 'object')
   check('jailbreak pattern list exported', Array.isArray(modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERNS) && modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERNS.length > 0)
   check('jailbreak combined regexp exported', modules.jailbreakRuleset.JAILBREAK_INPUT_RE instanceof RegExp)
+  for (const toolModuleName of ['agentToolTime', 'agentToolCalculator', 'agentToolWebSearch', 'agentToolReadFile', 'agentToolFindFiles', 'agentToolShell', 'agentToolBrowserAction']) {
+    const tool = modules[toolModuleName]
+    check(`${toolModuleName}.definition exported`, !!(tool && tool.definition && typeof tool.definition.name === 'string'))
+    check(`${toolModuleName}.execute exported`, typeof tool.execute === 'function')
+    check(`${toolModuleName}.defaultChannels exported`, Array.isArray(tool.defaultChannels))
+  }
 
   section('3. constants and provider invariants')
   const requiredConstants = [
@@ -628,6 +678,7 @@ async function main() {
     'CUSTOM_PROVIDERS_FILE', 'FALLBACK_CHAINS_FILE', 'THROTTLE_CONFIG_FILE',
     'RESERVED_PREFIXES', 'POLITICAL_DETECT_FILE', 'STICKER_DIR',
     'ADMIN_IDS_FILE', 'JAILBREAK_INPUT_RE', 'JAILBREAK_INPUT_PATTERNS',
+    'TOOL_MODE_FILE', 'TOOL_CONFIG_FILE', 'MAX_TOOL_ROUNDS',
   ]
   for (const name of requiredConstants) check(`constant exists: ${name}`, c[name] !== undefined)
   const aiPkg = readJson(path.join(AI_ROOT, 'package.json'))
@@ -666,6 +717,21 @@ async function main() {
     path.join(LIB, 'retaliation.js'),
     path.join(LIB, 'send-guard.js'),
     path.join(LIB, 'health-check.js'),
+    path.join(LIB, 'agent', 'engine.js'),
+    path.join(LIB, 'agent', 'config.js'),
+    path.join(LIB, 'agent', 'context.js'),
+    path.join(LIB, 'agent', 'skills.js'),
+    path.join(LIB, 'agent', 'stats.js'),
+    path.join(LIB, 'agent', 'pending.js'),
+    path.join(LIB, 'agent', 'safety.js'),
+    path.join(LIB, 'agent', 'tools', 'registry.js'),
+    path.join(LIB, 'agent', 'tools', 'get-time.js'),
+    path.join(LIB, 'agent', 'tools', 'calculator.js'),
+    path.join(LIB, 'agent', 'tools', 'web-search.js'),
+    path.join(LIB, 'agent', 'tools', 'browser-action.js'),
+    path.join(LIB, 'agent', 'tools', 'read-file.js'),
+    path.join(LIB, 'agent', 'tools', 'find-files.js'),
+    path.join(LIB, 'agent', 'tools', 'shell.js'),
     path.join(HELP, 'index.js'),
     __filename,
   ]
@@ -673,7 +739,7 @@ async function main() {
     runSyntaxCheck(`node -c ${path.relative(ROOT, file)}`, file)
   }
 
-  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js']
+  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/config.js', 'agent/context.js', 'agent/skills.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/find-files.js', 'agent/tools/shell.js']
   const functions = []
   for (const file of duplicateScanFiles) {
     const src = read(path.join(LIB, file))
@@ -767,6 +833,39 @@ async function main() {
     } catch (error) {
       check('chat completions rejects reasoning-only response', /Empty model response/.test(String(error && error.message || error)))
     }
+
+    const toolDefs = [{ type: 'function', function: { name: 'get_current_time', parameters: { type: 'object', properties: {} } } }]
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: '', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] } }] }
+      },
+    })
+    const toolCallResult = await api.requestChatCompletions([], { baseURL: 'https://example.invalid/v1', apiKey: 'k', model: 'm', _fallbackTried: 4 }, {}, toolDefs)
+    checkEqual('chat completions returns tool calls before content fallback', toolCallResult.type, 'tool_calls')
+    checkEqual('chat completions preserves tool call name', toolCallResult.tool_calls[0].function.name, 'get_current_time')
+
+    const fallbackToolBodies = []
+    global.fetch = async (url, options = {}) => {
+      fallbackToolBodies.push(JSON.parse(options.body || '{}'))
+      if (fallbackToolBodies.length === 1) {
+        return {
+          ok: true,
+          async json() {
+            return { choices: [{ message: { content: '', reasoning_content: '内部推理不能外发' } }] }
+          },
+        }
+      }
+      return {
+        ok: true,
+        async json() {
+          return { choices: [{ message: { tool_calls: [{ id: 'tc2', type: 'function', function: { name: 'calculate', arguments: '{"expression":"1+1"}' } }] } }] }
+        },
+      }
+    }
+    const fallbackToolResult = await api.requestChatCompletions([], { baseURL: 'https://example.invalid/v1', apiKey: 'k', model: 'm' }, {}, toolDefs)
+    checkEqual('chat completions fallback preserves tool calls', fallbackToolResult.type, 'tool_calls')
+    check('chat completions fallback request keeps tools', Array.isArray(fallbackToolBodies[1] && fallbackToolBodies[1].tools) && fallbackToolBodies[1].tools.length === 1)
 
     const fallbackBodies = []
     global.fetch = async (url, options = {}) => {
@@ -955,6 +1054,69 @@ async function main() {
   check('today emotion rejects private context', privateEmotionRun.result && privateEmotionRun.result.matched)
   const normalRun = await runHandler('ordinary chat text')
   check('ordinary text is not command', normalRun.result && normalRun.result.matched === false)
+  const casualLianRun = await runHandler('莲莲 你好')
+  check('casual lian chat is not hijacked by agent', casualLianRun.result && casualLianRun.result.matched === false)
+
+  section('9.5 agent tool contracts')
+  const qqTools = modules.agentToolRegistry.getToolDefinitions('qq').map(item => item.function && item.function.name).filter(Boolean)
+  const dashboardTools = modules.agentToolRegistry.getToolDefinitions('dashboard').map(item => item.function && item.function.name).filter(Boolean)
+  check('agent qq exposes time tool', qqTools.includes('get_current_time'))
+  check('agent qq exposes calculator tool', qqTools.includes('calculate'))
+  check('agent qq web_search follows config', qqTools.includes('web_search') === modules.agentConfig.isToolEnabled('qq', 'web_search'))
+  check('agent qq does not expose file read', !qqTools.includes('read_file'))
+  check('agent qq does not expose file search', !qqTools.includes('find_files'))
+  check('agent qq does not expose shell', !qqTools.includes('execute_shell'))
+  check('agent dashboard exposes read file', dashboardTools.includes('read_file'))
+  check('agent dashboard exposes file search', dashboardTools.includes('find_files'))
+  check('agent dashboard does not expose browser placeholder by default', !dashboardTools.includes('browser_action'))
+  check('agent safety blocks unknown tool', modules.agentSafety.check('missing_tool').allowed === false)
+  check('agent safety treats shell as dangerous', modules.agentSafety.DANGEROUS_TOOLS && modules.agentSafety.DANGEROUS_TOOLS.has('execute_shell'))
+  checkEqual('agent token estimate counts content', modules.agentContext.estimateTokens([{ role: 'user', content: 'hello' }]), 2)
+  check('agent tool result truncates long output', modules.agentContext.truncateToolResult('x'.repeat(8100)).includes('结果截断'))
+  check('agent context compacts long message list', modules.agentContext.compactMessages(Array.from({ length: 40 }, (_, i) => ({ role: i ? 'user' : 'system', content: String(i) })), 10).length <= 12)
+  check('agent skills parses frontmatter name', modules.agentSkills.parseFrontmatter('---\nname: Demo\ndescription: Test\n---\nbody').name === 'Demo')
+  const pendingId = modules.agentPending.setPendingTool('g1', 'u1', { toolName: 'calculate', args: { expression: '1+1' } })
+  check('agent pending stores id', typeof pendingId === 'string' && pendingId.startsWith('pnd'))
+  checkEqual('agent pending retrieves tool name', modules.agentPending.getPendingTool('g1', 'u1').toolName, 'calculate')
+  modules.agentPending.clearPendingTool('g1', 'u1')
+  checkEqual('agent pending clears request', modules.agentPending.getPendingTool('g1', 'u1'), null)
+  checkEqual('agent calculator computes simple expression', await modules.agentToolCalculator.execute({ expression: '0.1 + 0.2' }), '0.3')
+  try {
+    await modules.agentToolCalculator.execute({ expression: 'Math.constructor("return process")()' })
+    fail('agent calculator rejects unsafe Math access', 'unsafe expression executed')
+  } catch (error) {
+    check('agent calculator rejects unsafe Math access', /不支持的 Math 函数|不安全字符/.test(String(error && error.message || error)))
+  }
+  const originalAgentDataDir = process.env.DONGXUELIAN_AI_DATA_DIR
+  const agentTmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cascade-agent-'))
+  try {
+    process.env.DONGXUELIAN_AI_DATA_DIR = agentTmp
+    for (const rel of ['constants', 'agent/config', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/find-files', 'agent/safety']) {
+      delete require.cache[require.resolve(path.join(LIB, rel))]
+    }
+    const isolatedConfig = require(path.join(LIB, 'agent', 'config'))
+    const isolatedRegistry = require(path.join(LIB, 'agent', 'tools', 'registry'))
+    const isolatedSafety = require(path.join(LIB, 'agent', 'safety'))
+    check('agent config default dangerous policy confirm', isolatedConfig.getDangerousPolicy() === 'confirm')
+    check('agent config default qq read_file disabled', !isolatedConfig.isToolEnabled('qq', 'read_file'))
+    check('agent config default qq find_files disabled', !isolatedConfig.isToolEnabled('qq', 'find_files'))
+    check('agent config default dashboard read_file enabled', isolatedConfig.isToolEnabled('dashboard', 'read_file'))
+    check('agent config default dashboard find_files enabled', isolatedConfig.isToolEnabled('dashboard', 'find_files'))
+    check('agent config default browser placeholder disabled', !isolatedConfig.isToolEnabled('dashboard', 'browser_action'))
+    await isolatedConfig.setToolEnabled('qq', 'web_search', true)
+    check('agent config enables qq web_search', isolatedRegistry.getToolDefinitions('qq').some(item => item.function.name === 'web_search'))
+    await isolatedConfig.patchAgentConfig({ dangerousPolicy: 'block' })
+    check('agent config dangerous policy blocks shell', isolatedSafety.check('execute_shell').allowed === false)
+    await isolatedConfig.setToolEnabled('dashboard', 'browser_action', true)
+    check('agent config can expose browser placeholder when explicitly enabled', isolatedRegistry.getToolDefinitions('dashboard').some(item => item.function.name === 'browser_action'))
+  } finally {
+    if (originalAgentDataDir) process.env.DONGXUELIAN_AI_DATA_DIR = originalAgentDataDir
+    else delete process.env.DONGXUELIAN_AI_DATA_DIR
+    for (const rel of ['constants', 'agent/config', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/find-files', 'agent/safety']) {
+      delete require.cache[require.resolve(path.join(LIB, rel))]
+    }
+    try { fs.rmSync(agentTmp, { recursive: true, force: true }) } catch {}
+  }
 
   section('10. persona resources')
   const frontmatter = p.parsePersonaFrontmatter('---\nname: Test\ndescription: Demo\nenabled: true\n---\nbody')
@@ -1075,6 +1237,13 @@ async function main() {
   check('dashboard deploy does not copy removed patch.js', !dashboardStandalone.includes('/patch.js') && !dashboardStandalone.includes('patch.js ${s}'))
   check('dashboard stop avoids broad koishi pkill', !dashboardStandalone.includes("pkill -9 -f 'koishi'"))
   check('dashboard explicit local auth bypass only', dashboardStandalone.includes('function isLocalAuthBypass') && dashboardStandalone.includes('GLOBAL_LOCAL_MODE'))
+  check('dashboard exposes agent config API', dashboardStandalone.includes("/dashboard/api/agent/config") && dashboardStandalone.includes("agent', 'config"))
+  check('dashboard exposes agent chat API', dashboardStandalone.includes("/dashboard/api/agent/chat") && dashboardStandalone.includes("agent', 'engine"))
+  check('dashboard agent API returns skill index', dashboardStandalone.includes("agent', 'skills") && dashboardStandalone.includes('listAgentSkills'))
+  const dashboardAppSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'frontend', 'src', 'App.vue'))
+  const dashboardAgentPanelSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'frontend', 'src', 'components', 'AgentPanel.vue'))
+  check('dashboard sidebar includes agent panel tab', dashboardAppSrc.includes("id: 'agent'") && dashboardAppSrc.includes('AgentPanel'))
+  check('dashboard agent panel manages tools and skills', dashboardAgentPanelSrc.includes('fetchAgentConfig') && dashboardAgentPanelSrc.includes('Skill 索引'))
   check('dashboard rejects missing access password', dashboardStandalone.includes('access password is not configured'))
   check('restart-bot uses local koishi binary', restartBot.includes('node "$APP_DIR/node_modules/koishi/bin.js" start'))
   check('restart-bot does not use stale koishi.config.js', !restartBot.includes('koishi.config.js'))

@@ -87,6 +87,9 @@ const POLITICAL_DETECT_FILE = path.join(DATA_DIR, 'political-detect-enabled.json
 const SENSITIVE_CACHE_PREFIX = path.join(DATA_DIR, 'sensitive-cache-')
 const STICKER_DIR = path.join(DATA_DIR, 'stickers')
 const CONVERSATIONS_DIR = path.join(DATA_DIR, 'conversations')
+const TOOL_MODE_FILE = path.join(DATA_DIR, 'ai-tool-mode.txt')
+const TOOL_CONFIG_FILE = path.join(DATA_DIR, 'ai-tool-config.json')
+const MAX_TOOL_ROUNDS = 5
 
 const NUMERIC_GROUP_ID_RE = /^\d+$/
 const AT_ID_PATTERN_XML = /<at(?:\s+[^>]*?)?id="(\d+)"[^>]*\/?>/gi
@@ -142,6 +145,7 @@ module.exports = {
   THINKING_MODE_FILE, USER_PROFILE_DIR,
   POLITICAL_HANDLER_DIR, POLITICAL_DETECT_FILE, SENSITIVE_CACHE_PREFIX,
   STICKER_DIR, CONVERSATIONS_DIR,
+  TOOL_MODE_FILE, TOOL_CONFIG_FILE, MAX_TOOL_ROUNDS,
   NUMERIC_GROUP_ID_RE, AT_ID_PATTERN_XML, AT_ID_PATTERN_CQ,
   OVERUSED_REPLY_PATTERNS,
   ABUSIVE_INPUT_RE, HOSTILE_INPUT_RE, RARE_PROVOCATION_RE, WIDE_RARE_PROVOKE_RE, HOSTILE_SINGLE_TOKENS,

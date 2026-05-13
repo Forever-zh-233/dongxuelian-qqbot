@@ -105,13 +105,13 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
       console.warn('[dongxuelian-ai] reasoning-only model response dropped')
       const fbStep = (config._fallbackTried || 0) + 1
       const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)
-      if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig))
+      if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig), tools)
     }
     if (!content) throw new Error('Empty model response.')
     if (/request was rejected|considered high risk/i.test(content)) {
       const fbStep = (config._fallbackTried || 0) + 1
       const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)
-      if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig))
+      if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig), tools)
       content = ''
     }
     if (!content) throw new Error('Empty model response.')
@@ -121,7 +121,7 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
     const fbStep = (config._fallbackTried || 0) + 1
     if (!isHttpError && fbStep <= 5) {
       const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)
-      if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig))
+      if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig), tools)
     }
     throw networkErr
   }
