@@ -280,18 +280,7 @@ export default {
 }
 
 .sidebar-item.active::before {
-  content: '';
-  position: absolute;
-  inset: 4px 2px;
-  border-radius: 999px;
-  background:
-    radial-gradient(80% 150% at 50% 50%, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.026) 46%, transparent 72%),
-    linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent), rgba(115, 215, 255, 0.02), transparent 82%);
-  opacity: .28;
-  transform: scaleX(.92) scaleY(.72);
-  filter: none;
-  box-shadow: none;
-  transition: opacity .14s ease, transform .16s ease;
+  content: none;
 }
 
 .sidebar-item.active::after {
