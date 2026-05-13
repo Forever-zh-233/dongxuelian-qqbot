@@ -428,10 +428,15 @@ export default {
   .dashboard-sidebar {
     width: min(57.4vw, 210px);
     box-shadow:
-      0 18px 58px rgba(0, 0, 0, 0.1),
-      inset 1px 0 0 rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
-    -webkit-backdrop-filter: blur(8px) saturate(1.4) contrast(1.05);
+      0 14px 36px rgba(0, 0, 0, 0.08),
+      inset 1px 0 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(4px) saturate(1.2);
+    -webkit-backdrop-filter: blur(4px) saturate(1.2);
+    transition: transform 0.2s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+  .dashboard-sidebar::before,
+  .dashboard-sidebar::after {
+    content: none;
   }
   .dashboard-sidebar.collapsed {
     width: 56px;

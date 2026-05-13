@@ -127,7 +127,7 @@
 </template>
 
 <script>
-import { computed, ref, onMounted, onActivated, inject } from 'vue'
+import { computed, ref, onMounted, inject } from 'vue'
 import { botStatus, startBot, stopBot, fetchMaintenance, setMaintenance, fetchQQToken, fetchSSHInfo, fetchSelfId, updateSelfId, fetchThrottle, saveThrottle } from '../api'
 
 export default {
@@ -184,11 +184,6 @@ export default {
     const savingSelfId = ref(false)
     const selfIdMsg = ref(null)
     const diagMsg = ref('')
-
-    onActivated(() => {
-      acting.value = false
-      loadStatus()
-    })
 
     async function loadStatus() {
       const res = await botStatus()
