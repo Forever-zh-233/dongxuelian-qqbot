@@ -21,11 +21,9 @@
       <ThemeSwitcher :visible="themePickerOpen" :themes="themes" :current="theme" @select="setTheme" @close="themePickerOpen = false" />
 
       <div style="position:relative;z-index:1">
-        <Transition name="tab-fade" mode="out-in">
-          <KeepAlive>
-            <component :is="activeComponent" :key="activeTab" :locked="!deployUnlocked" @unlocked="unlockDeploy" />
-          </KeepAlive>
-        </Transition>
+        <KeepAlive>
+          <component :is="activeComponent" :key="activeTab" :locked="!deployUnlocked" @unlocked="unlockDeploy" />
+        </KeepAlive>
       </div>
     </div>
     <AdminModal v-if="!isElectronDeployer" :visible="adminModalOpen" :message="adminModalMsg" @verified="onAdminModalVerified" @cancel="onAdminModalCancel" />
@@ -81,8 +79,8 @@ export default {
       { id: 'sakura-pink', label: '樱花粉', desc: '柔美粉白配桃红点缀，清新甜美', colors: ['#fff6fa', '#ec4899', '#fbcfe8'] },
     ]
 
-    function normalizeTheme(value) { return themes.some(item => item.id === value) ? value : 'dark-gold' }
-    const defaultTheme = window.dongxuelianDeployer ? 'light' : 'dark-gold'
+    function normalizeTheme(value) { return themes.some(item => item.id === value) ? value : 'clear-water' }
+    const defaultTheme = window.dongxuelianDeployer ? 'light' : 'clear-water'
     const theme = ref(normalizeTheme(localStorage.getItem('dashboard_theme') || defaultTheme))
     const currentThemeLabel = computed(() => themes.find(item => item.id === theme.value)?.label || '暗金')
 
@@ -108,6 +106,8 @@ export default {
     const activeComponent = computed(() => componentMap[activeTab.value] || DeployPanel)
     const activeTabLabel = computed(() => tabs.value.find(item => item.id === activeTab.value)?.label || '部署')
     const isMobileSidebarOpen = computed(() => isMobileViewport.value && sidebarExpanded.value)
+    let tabSwitchUnlockTimer = null
+    let tabSwitchLocked = false
 
     function onLoggedIn() {
       loggedIn.value = true
@@ -138,6 +138,12 @@ export default {
     provide('showAdminDialog', showAdminDialog)
 
     function doSwitchTab(id) {
+      if (id === activeTab.value) return
+      if (!tabs.value.some(item => item.id === id)) return
+      if (tabSwitchLocked) return
+      tabSwitchLocked = true
+      if (tabSwitchUnlockTimer) clearTimeout(tabSwitchUnlockTimer)
+      tabSwitchUnlockTimer = setTimeout(() => { tabSwitchLocked = false; tabSwitchUnlockTimer = null }, 150)
       activeTab.value = id
       if (deployUnlocked.value) localStorage.setItem('dashboard_active_tab', id)
       if (isMobileViewport.value) setSidebarExpanded(false)
@@ -175,6 +181,7 @@ export default {
       window.removeEventListener('auth-expired', logout)
       window.removeEventListener('resize', handleResize)
       window.removeEventListener('keydown', handleKeydown)
+      if (tabSwitchUnlockTimer) clearTimeout(tabSwitchUnlockTimer)
     })
 
     return { isElectronDeployer, loggedIn, sidebarExpanded, isMobileSidebarOpen, themePickerOpen, themes, theme, currentThemeLabel, deployUnlocked, tabs, activeTab, activeTabLabel, activeComponent, adminModalOpen, adminModalMsg, onLoggedIn, onAdminModalVerified, onAdminModalCancel, unlockDeploy, logout, setTheme, doSwitchTab, setSidebarExpanded, toggleSidebar }
