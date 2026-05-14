@@ -3182,9 +3182,10 @@ const server = http.createServer((req, res) => {
     ;(async () => {
       try {
         const pending = require(path.join(AI_LIB, 'agent', 'pending'))
-        const p = pending.getPendingTool('dashboard', 'dashboard')
-        if (!p || p.id !== decodeURIComponent(toolApproveMatch[1])) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
-        const result = await pending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', decodeURIComponent(toolApproveMatch[1]))
+        const pendingId = decodeURIComponent(toolApproveMatch[1])
+        const p = pending.findPendingToolById(pendingId)
+        if (!p) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
+        const result = await pending.confirmPendingTool(p.channelKey, p.userId, p.channel || 'dashboard', pendingId)
         return json(res, { ok: result.ok, toolName: result.toolName, result: result.result, message: result.message || result.error || '' }, result.ok ? 200 : (result.status || 500))
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })()
@@ -3193,6 +3194,7 @@ const server = http.createServer((req, res) => {
 
   // Agent 工具配置与控制台
   if (pathname === '/dashboard/api/agent/config' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
     try {
       const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig(true)
       const registry = require(path.join(AI_LIB, 'agent', 'tools', 'registry'))
@@ -3229,6 +3231,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (pathname === '/dashboard/api/agent/sessions' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
     try {
       const sessions = require(path.join(AI_LIB, 'agent', 'sessions')).listAgentSessions()
       return json(res, { ok: true, sessions })
@@ -3265,10 +3268,9 @@ const server = http.createServer((req, res) => {
         const pending = require(path.join(AI_LIB, 'agent', 'pending'))
         const data = JSON.parse(body || '{}')
         const expectedId = String(data.pendingId || '')
-        const p = pending.getPendingTool('dashboard', 'dashboard')
+        const p = expectedId ? pending.findPendingToolById(expectedId) : pending.getPendingTool('dashboard', 'dashboard')
         if (!p) return json(res, { ok: false, message: '没有待确认工具' }, 404)
-        if (expectedId && p.id !== expectedId) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
-        const result = await pending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', expectedId)
+        const result = await pending.confirmPendingTool(p.channelKey, p.userId, p.channel || 'dashboard', expectedId)
         return json(res, { ok: result.ok, toolName: result.toolName, result: result.result, message: result.message || result.error || '' }, result.ok ? 200 : (result.status || 500))
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })

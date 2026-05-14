@@ -3,16 +3,9 @@
  * 安全：限定工作区目录，支持 offset/limit 分页。
  */
 const fs = require('fs/promises')
-const path = require('path')
-const { getReadFileRoots } = require('../config')
+const { assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const MAX_FILE_BYTES = 512 * 1024
-
-function getAllowedRoots() {
-  const roots = getReadFileRoots()
-  if (roots.length > 0) return roots
-  return [process.cwd()]
-}
 
 module.exports = {
   definition: {
@@ -32,11 +25,7 @@ module.exports = {
     const filePath = String(params.path || '').trim()
     if (!filePath) throw new Error('路径不能为空')
 
-    const abs = path.resolve(filePath)
-    const allowedRoots = getAllowedRoots().map(root => path.resolve(root))
-    if (!allowedRoots.some(root => abs === root || abs.startsWith(root + path.sep))) {
-      throw new Error(`路径超出允许范围：${filePath}`)
-    }
+    const { abs } = await assertExistingAgentPathInsideRoots(filePath, '文件')
 
     let stat
     try { stat = await fs.stat(abs) } catch { throw new Error(`文件不存在：${filePath}`) }

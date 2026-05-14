@@ -4,7 +4,7 @@
  */
 const fs = require('fs/promises')
 const path = require('path')
-const { assertNewAgentPathInsideRoots } = require('../path-guard')
+const { assertNewAgentPathInsideRoots, assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const MAX_CONTENT_BYTES = 256 * 1024
 
@@ -34,8 +34,11 @@ module.exports = {
     const { abs } = await assertNewAgentPathInsideRoots(filePath, '路径', !!params.createDirectories)
     const parent = path.dirname(abs)
 
+    const linkStat = await fs.lstat(abs).catch(() => null)
+    if (linkStat && linkStat.isSymbolicLink()) throw new Error(`目标是符号链接，拒绝写入：${filePath}`)
     let existing = null
     try { existing = await fs.stat(abs) } catch {}
+    if (existing) await assertExistingAgentPathInsideRoots(abs, '路径')
     if (existing && existing.isDirectory()) throw new Error(`目标是目录：${filePath}`)
     if (existing && !params.overwrite) throw new Error('文件已存在，如需覆盖请设置 overwrite=true')
 

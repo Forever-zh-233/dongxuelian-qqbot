@@ -6,28 +6,16 @@
  */
 const fs = require('fs/promises')
 const path = require('path')
-const { getReadFileRoots } = require('../config')
+const { assertExistingAgentPathInsideRoots, resolveAgentDefaultRoot } = require('../path-guard')
 
 const MAX_RESULTS = 80
 const MAX_VISITED = 4000
 const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'dist-portable', '.claude', 'tmp'])
 
-function getSearchRoots() {
-  const roots = getReadFileRoots()
-  if (roots.length > 0) return roots
-  return [process.cwd()]
-}
-
 function wildcardToRegExp(pattern) {
   const text = String(pattern || '*').trim() || '*'
   const escaped = text.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
   return new RegExp('^' + escaped + '$', 'i')
-}
-
-function isInsideRoot(target, root) {
-  const absTarget = path.resolve(target)
-  const absRoot = path.resolve(root)
-  return absTarget === absRoot || absTarget.startsWith(absRoot + path.sep)
 }
 
 module.exports = {
@@ -43,9 +31,8 @@ module.exports = {
     },
   },
   async execute(params = {}) {
-    const roots = getSearchRoots().map(root => path.resolve(root))
-    const root = path.resolve(String(params.root || roots[0] || process.cwd()))
-    if (!roots.some(allowed => isInsideRoot(root, allowed))) throw new Error(`搜索目录超出允许范围：${root}`)
+    const requested = params.root ? String(params.root) : await resolveAgentDefaultRoot()
+    const { abs: root } = await assertExistingAgentPathInsideRoots(requested, '搜索目录')
     const matcher = wildcardToRegExp(params.pattern || '*')
     const results = []
     let visited = 0

@@ -20,7 +20,10 @@ const DEFAULT_CONFIG = Object.freeze({
         calculate: true,
         web_search: false,
         read_file: false,
+        list_files: false,
         find_files: false,
+        write_file: false,
+        edit_file: false,
         execute_shell: false,
         browser_action: false,
       },
@@ -32,13 +35,21 @@ const DEFAULT_CONFIG = Object.freeze({
         calculate: true,
         web_search: true,
         read_file: true,
+        list_files: true,
         find_files: true,
+        write_file: true,
+        edit_file: true,
         execute_shell: false,
         browser_action: false,
       },
     },
   },
   dangerousPolicy: 'confirm',
+  autoRoute: {
+    qq: { enabled: false },
+    dashboard: { enabled: false },
+  },
+  enabledSkills: [],
   readFileRoots: [],
 })
 
@@ -82,7 +93,14 @@ function normalizeConfig(raw = {}) {
   const readFileRoots = Array.isArray(source.readFileRoots)
     ? source.readFileRoots.map(normalizeRoot).filter(Boolean).slice(0, 16)
     : defaults.readFileRoots
-  return { version: 1, channels, dangerousPolicy, readFileRoots }
+  const autoRoute = {
+    qq: { enabled: source.autoRoute?.qq?.enabled === undefined ? defaults.autoRoute.qq.enabled : !!source.autoRoute.qq.enabled },
+    dashboard: { enabled: source.autoRoute?.dashboard?.enabled === undefined ? defaults.autoRoute.dashboard.enabled : !!source.autoRoute.dashboard.enabled },
+  }
+  const enabledSkills = Array.isArray(source.enabledSkills)
+    ? source.enabledSkills.map(item => String(item || '').trim()).filter(Boolean).slice(0, 32)
+    : defaults.enabledSkills
+  return { version: 1, channels, dangerousPolicy, autoRoute, enabledSkills, readFileRoots }
 }
 
 function readConfigFile() {
@@ -155,6 +173,15 @@ function getDangerousPolicy() {
   return getAgentConfig().dangerousPolicy
 }
 
+function isAutoRouteEnabled(channel = 'qq') {
+  const config = getAgentConfig()
+  return !!(config.autoRoute && config.autoRoute[channel] && config.autoRoute[channel].enabled)
+}
+
+function getEnabledSkills() {
+  return getAgentConfig().enabledSkills.slice()
+}
+
 function resetAgentConfigCache() {
   configCache = null
 }
@@ -170,5 +197,7 @@ module.exports = {
   isToolEnabled,
   getReadFileRoots,
   getDangerousPolicy,
+  isAutoRouteEnabled,
+  getEnabledSkills,
   resetAgentConfigCache,
 }

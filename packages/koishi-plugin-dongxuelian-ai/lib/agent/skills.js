@@ -52,4 +52,12 @@ function listAgentSkills() {
   return skills
 }
 
-module.exports = { listAgentSkills, parseFrontmatter }
+function buildAgentSkillSummary(enabledNames = []) {
+  const enabled = new Set((enabledNames || []).map(item => String(item || '').trim()).filter(Boolean))
+  if (enabled.size === 0) return ''
+  const selected = listAgentSkills().filter(skill => enabled.has(skill.name)).slice(0, 12)
+  if (selected.length === 0) return ''
+  return '已启用 Agent Skill：\n' + selected.map(skill => `- ${skill.name}（${skill.kind}）：${skill.description || '无描述'}`).join('\n')
+}
+
+module.exports = { listAgentSkills, parseFrontmatter, buildAgentSkillSummary }

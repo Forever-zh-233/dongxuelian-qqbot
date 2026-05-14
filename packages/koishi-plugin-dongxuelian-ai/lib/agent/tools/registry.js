@@ -1,19 +1,22 @@
 /**
  * MODULE: Agent 工具注册器。
- * 职责: 聚合工具定义、按渠道过滤、executeTool 分发、结果截断。
+ * 职责: 聚合工具定义、按渠道过滤、executeTool 分发。
  * 边界: 不调 AI API、不读配置、不存用户状态。
- * 状态: toolRegistry (module-level const)、lastReadCache (Map)。
+ * 状态: toolRegistry (module-level const)。
  */
 const getTimeTool = require('./get-time')
 const calculatorTool = require('./calculator')
 const webSearchTool = require('./web-search')
 const readFileTool = require('./read-file')
+const listFilesTool = require('./list-files')
 const findFilesTool = require('./find-files')
+const writeFileTool = require('./write-file')
+const editFileTool = require('./edit-file')
 const shellTool = require('./shell')
 const browserActionTool = require('./browser-action')
-const { isToolEnabled } = require('../config')
+const { getAgentConfig } = require('../config')
 
-const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, findFilesTool, shellTool, browserActionTool]
+const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool]
 
 const toolRegistry = {}
 for (const tool of tools) {
@@ -22,33 +25,37 @@ for (const tool of tools) {
 
 /** 按渠道过滤，返回 OpenAI 标准格式的工具定义 */
 function getToolDefinitions(channel = 'qq') {
+  const config = getAgentConfig()
+  const channelConfig = config.channels[channel]
+  if (!channelConfig || !channelConfig.enabled) return []
   return tools
     .filter(t => {
       const name = t.definition.name
       const channels = t.defaultChannels || ['dashboard', 'qq']
-      return channels.includes(channel) && isToolEnabled(channel, name)
+      return channels.includes(channel) && !!channelConfig.tools[name]
     })
     .map(t => ({ type: 'function', function: t.definition }))
 }
 
-/** 安全执行工具：超时 + 截断 + 错误包裹 */
+/** 安全执行工具：超时 + 错误包裹 */
 async function executeTool(toolName, params = {}) {
   const tool = toolRegistry[toolName]
-  if (!tool) return `未知工具：${toolName}`
+  if (!tool) return { ok: false, text: `未知工具：${toolName}`, error: `未知工具：${toolName}` }
 
+  let timeoutId = null
   try {
-    const result = await Promise.race([
-      tool.execute(params),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('执行超时')), 30000)
-      ),
-    ])
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('执行超时')), 30000)
+    })
+    const result = await Promise.race([tool.execute(params), timeoutPromise])
 
     const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
-    if (text.length > 4000) return text.slice(0, 4000) + '\n...(截断)'
-    return text
+    return { ok: true, text }
   } catch (err) {
-    return `工具 '${toolName}' 执行失败: ${err.message}`
+    const message = `工具 '${toolName}' 执行失败: ${err.message}`
+    return { ok: false, text: message, error: err.message }
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
   }
 }
 

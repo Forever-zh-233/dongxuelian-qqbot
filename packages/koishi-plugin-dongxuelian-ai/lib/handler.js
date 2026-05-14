@@ -751,25 +751,19 @@ async function handleCommand(session, ctx, state) {
     if (!hasAdminPermission(session)) return handled('只有管理员能操作此命令。')
     const enabled = /^(?:开|on)$/i.test(skillSwitchMatch[1])
     const skillName = skillSwitchMatch[2].trim()
-    const agentSkills = require('./agent/skills')
-    const known = agentSkills.listAgentSkills().some(skill => skill.name === skillName)
-    if (!known) return handled(`未知 Agent Skill：${skillName}`)
-    const agentConfig = require('./agent/config')
-    const config = agentConfig.getAgentConfig()
-    const current = new Set(config.enabledSkills || [])
-    if (enabled) current.add(skillName)
-    else current.delete(skillName)
-    config.enabledSkills = Array.from(current).slice(0, 32)
-    await agentConfig.saveAgentConfig(config)
-    return handled(`Agent Skill ${skillName}：${enabled ? '启用' : '禁用'}`)
+    const skillHub = require('./agent/skill-hub')
+    try {
+      const skill = await skillHub.setSkillHubEnabled(skillName, enabled)
+      return handled(`Agent Skill ${skill.name}：${enabled ? '启用' : '禁用'}`)
+    } catch (error) {
+      return handled(error.message || `未知 Agent Skill：${skillName}`)
+    }
   }
 
   if (/^(?:东雪莲)?工具Skill\s*(?:列表|list)?$/i.test(plain)) {
-    const agentConfig = require('./agent/config').getAgentConfig()
-    const enabled = new Set(agentConfig.enabledSkills || [])
-    const skills = require('./agent/skills').listAgentSkills().slice(0, 20)
+    const skills = require('./agent/skill-hub').listSkillHubItems().slice(0, 20)
     if (skills.length === 0) return handled('暂无 Agent Skill。')
-    return handled(skills.map(skill => `${enabled.has(skill.name) ? '✅' : '□'} ${skill.name}（${skill.kind}）：${skill.description || '无描述'}`).join('\n'))
+    return handled(require('./agent/skill-hub').formatSkillHubItems(skills))
   }
 
   if (/^(?:东雪莲)?工具状态$/.test(plain)) {

@@ -208,6 +208,7 @@ export async function saveAgentConfig(data) { return put('/agent/config', data, 
 export async function sendAgentMessage(message, history = []) { return post('/agent/chat', { message, history }, true, 60000) }
 export async function confirmAgentTool(pendingId = '') { return post('/agent/confirm', { pendingId }, true, 60000) }
 export async function fetchPendingAgentTools() { return get('/tools/pending', true) }
+export async function fetchAgentSessions() { return get('/agent/sessions', true) }
 export async function fetchGalleryImages() { return get('/gallery') }
 export async function uploadGalleryImage(data) { return post('/gallery', data, false, 60000) }
 export async function deleteGalleryImage(idOrIds) { return del('/gallery', Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds }, true) }

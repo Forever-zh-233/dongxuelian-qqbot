@@ -23,15 +23,19 @@ async function setMode(m) {
   try { await fsp.writeFile(TOOL_MODE_FILE, mode, 'utf8') } catch {}
 }
 
-const DANGEROUS_TOOLS = new Set(['execute_shell', 'write_file', 'edit_file', 'execute_javascript', 'browser_action'])
+const DANGEROUS_TOOLS = new Set(['web_search', 'execute_shell', 'write_file', 'edit_file', 'execute_javascript', 'browser_action'])
+
+function getEffectivePolicy() {
+  return mode === 'config' ? getDangerousPolicy() : mode
+}
 
 function check(toolName) {
   if (!toolRegistry[toolName]) return { allowed: false, error: `未知工具: ${toolName}` }
   if (!DANGEROUS_TOOLS.has(toolName)) return { allowed: true }
-  const policy = mode === 'config' ? getDangerousPolicy() : mode
-  if (policy === 'block') return { allowed: false, error: `工具 '${toolName}' 已被禁用（block 模式）` }
-  if (policy === 'confirm') return { allowed: false, error: `工具 '${toolName}' 需要确认（confirm 模式）` }
-  return { allowed: true }
+  const policy = getEffectivePolicy()
+  if (policy === 'block') return { allowed: false, action: 'block', error: `工具 '${toolName}' 已被禁用（block 模式）` }
+  if (policy === 'confirm') return { allowed: false, action: 'confirm', error: `工具 '${toolName}' 需要确认（confirm 模式）` }
+  return { allowed: true, action: 'auto' }
 }
 
-module.exports = { getMode, setMode, check, DANGEROUS_TOOLS }
+module.exports = { getMode, setMode, getEffectivePolicy, check, DANGEROUS_TOOLS }

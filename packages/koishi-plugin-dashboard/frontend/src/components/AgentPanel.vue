@@ -86,8 +86,43 @@
 
     <div class="section-head">
       <h3>Dashboard Agent 测试</h3>
-      <span class="muted">累计调用 {{ stats.total || 0 }} 次</span>
+      <span class="muted">累计调用 {{ stats.total || 0 }} 次 · QQ {{ stats.byChannel?.qq || 0 }} / Dashboard {{ stats.byChannel?.dashboard || 0 }}</span>
     </div>
+    <div v-if="pendingTools.length" class="section-head">
+      <h3>审批队列</h3>
+      <span class="muted">{{ pendingTools.length }} 个待确认</span>
+    </div>
+    <div v-if="pendingTools.length" class="pending-list">
+      <div v-for="item in pendingTools" :key="item.id" class="pending-row">
+        <div>
+          <strong>{{ item.toolName }}</strong>
+          <p>{{ item.channelKey }} / {{ item.userId }} · {{ formatTime(item.expireAt) }} 过期</p>
+          <small>{{ item.argsSummary || '无参数摘要' }}</small>
+        </div>
+        <button class="ghost" type="button" :disabled="sending" @click="confirmPendingTool(item.id)">确认</button>
+      </div>
+    </div>
+
+    <div v-if="sessions.length" class="section-head">
+      <h3>Agent Sessions</h3>
+      <span class="muted">{{ sessions.length }} 个</span>
+    </div>
+    <div v-if="sessions.length" class="session-list">
+      <div v-for="session in sessions" :key="session.id" class="session-row">
+        <strong>{{ session.title }}</strong>
+        <p>{{ session.channel }} / {{ session.userName }} · {{ session.turns }} 轮 · {{ session.toolCalls }} 次工具 · {{ formatTime(session.updatedAt) }}</p>
+        <small>{{ session.lastMessage }}</small>
+      </div>
+    </div>
+
+    <div v-if="stats.recent?.length" class="section-head">
+      <h3>最近工具调用</h3>
+      <span class="muted">{{ stats.recent.length }} 条</span>
+    </div>
+    <div v-if="stats.recent?.length" class="stats-list">
+      <span v-for="item in stats.recent" :key="item.at + item.tool" class="stat-pill">{{ item.channel }} · {{ item.tool }}</span>
+    </div>
+
     <div class="chat-box">
       <textarea v-model="prompt" placeholder="例如：读取 package.json 总结项目脚本" @keydown.ctrl.enter.prevent="sendMessage"></textarea>
       <div class="chat-actions">
@@ -107,7 +142,7 @@
 
 <script>
 import { onMounted, reactive, ref } from 'vue'
-import { fetchAgentConfig, saveAgentConfig, sendAgentMessage, confirmAgentTool, fetchPendingAgentTools } from '../api'
+import { fetchAgentConfig, saveAgentConfig, sendAgentMessage, confirmAgentTool, fetchPendingAgentTools, fetchAgentSessions } from '../api'
 
 const defaultConfig = {
   dangerousPolicy: 'confirm',
@@ -137,6 +172,8 @@ export default {
     const stats = ref({ total: 0 })
     const prompt = ref('')
     const pendingId = ref('')
+    const pendingTools = ref([])
+    const sessions = ref([])
     const history = ref([])
     const config = reactive(JSON.parse(JSON.stringify(defaultConfig)))
 
@@ -152,10 +189,25 @@ export default {
       config.enabledSkills = Array.isArray(merged.enabledSkills) ? merged.enabledSkills.slice() : []
     }
 
+    function formatTime(ts) {
+      if (!ts) return '-'
+      try { return new Date(ts).toLocaleTimeString() } catch { return '-' }
+    }
+
     async function loadPendingTools() {
       try {
         const res = await fetchPendingAgentTools()
-        if (res.ok && res.data?.ok) pendingId.value = res.data.pending?.[0]?.id || ''
+        if (res.ok && res.data?.ok) {
+          pendingTools.value = Array.isArray(res.data.pending) ? res.data.pending : []
+          pendingId.value = pendingTools.value[0]?.id || ''
+        }
+      } catch {}
+    }
+
+    async function loadSessions() {
+      try {
+        const res = await fetchAgentSessions()
+        if (res.ok && res.data?.ok) sessions.value = Array.isArray(res.data.sessions) ? res.data.sessions : []
       } catch {}
     }
 
@@ -175,6 +227,7 @@ export default {
           if (config.channels.dashboard.tools[tool.name] === undefined) config.channels.dashboard.tools[tool.name] = !!tool.dashboardEnabled
         }
         await loadPendingTools()
+        await loadSessions()
       } catch (e) {
         error.value = e.message || '加载失败'
       } finally {
@@ -221,12 +274,12 @@ export default {
       localStorage.removeItem('dashboard_agent_history')
     }
 
-    async function confirmPendingTool() {
-      if (!pendingId.value) return
+    async function confirmPendingTool(targetId = pendingId.value) {
+      if (!targetId) return
       sending.value = true
       error.value = ''
       try {
-        const res = await confirmAgentTool(pendingId.value)
+        const res = await confirmAgentTool(targetId)
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '确认失败')
         const content = `已执行 ${res.data.toolName}：\n${res.data.result || ''}`
         history.value.push({ role: 'assistant', content })
@@ -266,7 +319,7 @@ export default {
     }
 
     onMounted(() => { loadHistory(); loadConfig() })
-    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, pendingId, history, config, loadConfig, saveConfig, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, sendMessage }
+    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, pendingId, pendingTools, sessions, history, config, formatTime, loadConfig, saveConfig, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, sendMessage }
   },
 }
 </script>
@@ -296,6 +349,12 @@ textarea { min-height: 110px; resize: vertical; }
 .history-item { border: 1px solid var(--border); border-radius: 14px; padding: 12px; background: color-mix(in srgb, var(--input) 65%, transparent); }
 .history-item.user { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .history-item pre { white-space: pre-wrap; margin: 6px 0 0; color: var(--text); font-family: inherit; }
+.pending-list, .session-list { display: flex; flex-direction: column; gap: 8px; }
+.pending-row, .session-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: color-mix(in srgb, var(--input) 65%, transparent); }
+.session-row { grid-template-columns: 1fr; }
+.pending-row p, .session-row p, .session-row small { margin: 4px 0 0; color: var(--text3); }
+.stats-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat-pill { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; color: var(--text3); background: color-mix(in srgb, var(--input) 70%, transparent); }
 .chat-actions { display: flex; flex-direction: column; gap: 8px; }
 .notice { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 12px; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .notice.error { border-color: color-mix(in srgb, #ef4444 55%, var(--border)); background: color-mix(in srgb, #ef4444 12%, transparent); }

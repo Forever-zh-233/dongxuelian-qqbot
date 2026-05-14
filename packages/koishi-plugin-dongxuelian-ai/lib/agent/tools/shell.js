@@ -4,6 +4,7 @@
  */
 const { execFile } = require('child_process')
 const os = require('os')
+const { assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const DENYLIST = [
   /rm\s+(-rf?\s*\/|--no-preserve-root)/i,
@@ -30,7 +31,7 @@ module.exports = {
     if (command.length > 8000) throw new Error('命令过长')
     if (DENYLIST.some(re => re.test(command))) throw new Error(`危险命令已被拦截`)
 
-    const cwd = String(params.cwd || process.cwd())
+    const { abs: cwd } = await assertExistingAgentPathInsideRoots(params.cwd || process.cwd(), '工作目录')
     const isWin = os.platform() === 'win32'
 
     return new Promise(resolve => {
