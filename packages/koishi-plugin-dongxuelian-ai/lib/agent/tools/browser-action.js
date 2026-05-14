@@ -4,6 +4,7 @@ const path = require('path')
 const dns = require('dns/promises')
 const net = require('net')
 const { DATA_DIR } = require('../../constants')
+const { assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 let browser = null
 let page = null
@@ -189,6 +190,26 @@ function requireSelector(selector) {
   return value
 }
 
+function validateEvaluateCode(code = '') {
+  const value = String(code || '').trim()
+  if (!value || value.length > 4000) throw new Error('evaluate code 不能为空或过长')
+  if (/\b(localStorage|sessionStorage|indexedDB|caches|document\.cookie|navigator\.clipboard)\b/i.test(value)) throw new Error('evaluate 禁止访问浏览器本地隐私存储')
+  if (/\b(fetch|XMLHttpRequest|WebSocket|EventSource)\b/i.test(value)) throw new Error('evaluate 禁止发起网络请求')
+  if (/\b(document\.write|window\.open|location\s*=|location\.href\s*=|eval|Function)\b/i.test(value)) throw new Error('evaluate 禁止跳转、写文档或动态执行代码')
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) throw new Error('evaluate code 包含非法控制字符')
+  return value
+}
+
+async function evaluatePage(code) {
+  const p = await ensurePage()
+  const value = validateEvaluateCode(code)
+  const result = await p.evaluate(source => {
+    const fn = new Function('"use strict"; return (async () => { ' + source + '\n})()')
+    return fn()
+  }, value)
+  return JSON.stringify(result === undefined ? null : result, null, 2).slice(0, 8000)
+}
+
 async function clickSelector(selector) {
   const p = await ensurePage()
   const value = requireSelector(selector)
@@ -357,6 +378,33 @@ async function interact(action, params = {}) {
   return `已执行 ${action}: ${selector}`
 }
 
+async function dragElement(params = {}) {
+  const p = await ensurePage()
+  const selector = requireSelector(params.selector)
+  const targetSelector = String(params.targetSelector || '').trim()
+  const source = await p.$(selector)
+  if (!source) throw new Error(`未找到拖拽源：${selector}`)
+  const from = await source.boundingBox()
+  if (!from) throw new Error('无法获取拖拽源位置')
+  let to
+  if (targetSelector) {
+    const target = await p.$(requireSelector(targetSelector))
+    if (!target) throw new Error(`未找到拖拽目标：${targetSelector}`)
+    to = await target.boundingBox()
+  } else {
+    const x = parseInt(params.x, 10)
+    const y = parseInt(params.y, 10)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('drag 需要 targetSelector 或 x/y')
+    to = { x, y, width: 1, height: 1 }
+  }
+  if (!to) throw new Error('无法获取拖拽目标位置')
+  await p.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await p.mouse.down()
+  await p.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 })
+  await p.mouse.up()
+  return `已拖拽：${selector}${targetSelector ? ` -> ${targetSelector}` : ''}`
+}
+
 async function pressKey(key) {
   const p = await ensurePage()
   const value = String(key || '').trim()
@@ -465,12 +513,125 @@ async function manageCookies(action, params = {}) {
   throw new Error(`不支持的 cookie 动作：${action}`)
 }
 
+async function uploadFile(params = {}) {
+  const p = await ensurePage()
+  const selector = requireSelector(params.selector)
+  const files = Array.isArray(params.paths) ? params.paths : [params.path || params.file]
+  const targets = []
+  for (const item of files.slice(0, 10)) {
+    if (!item) continue
+    const { abs } = await assertExistingAgentPathInsideRoots(String(item), '上传文件')
+    const stat = await fs.promises.stat(abs)
+    if (!stat.isFile()) throw new Error(`不是文件：${abs}`)
+    targets.push(abs)
+  }
+  if (!targets.length) throw new Error('file_upload 需要 path 或 paths')
+  const input = await p.$(selector)
+  if (!input) throw new Error(`未找到文件输入框：${selector}`)
+  await input.uploadFile(...targets)
+  return `已选择上传文件：${targets.map(item => path.basename(item)).join(', ')}`
+}
+
+async function configureDownload(params = {}) {
+  const p = await ensurePage()
+  const dir = path.join(DATA_DIR, 'agent-browser', 'downloads')
+  fs.mkdirSync(dir, { recursive: true })
+  const client = await p.target().createCDPSession()
+  await client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dir })
+  if (params.selector) await clickSelector(params.selector)
+  return `下载目录已设置：${dir}`
+}
+
+async function clearBrowserCache() {
+  const p = await ensurePage()
+  const client = await p.target().createCDPSession()
+  await client.send('Network.clearBrowserCache').catch(() => {})
+  await client.send('Network.clearBrowserCookies').catch(() => {})
+  networkLog = []
+  consoleLog = []
+  return '浏览器缓存、cookies 与运行日志已清理'
+}
+
 function getConsoleMessages() {
   return JSON.stringify(consoleLog.slice(0, 50), null, 2)
 }
 
 function getNetworkRequests() {
   return JSON.stringify(networkLog.slice(0, 80), null, 2)
+}
+
+async function executeSingleAction(params = {}) {
+  const action = String(params.action || '').trim().toLowerCase()
+  if (action === 'start') { await ensurePage(); return '浏览器已启动' }
+  if (action === 'navigate' || action === 'open') return openUrl(params.url)
+  if (action === 'url') { const p = await ensurePage(); return p.url() }
+  if (action === 'reload' || action === 'back' || action === 'navigate_back' || action === 'forward' || action === 'navigate_forward') return navigateHistory(action === 'navigate_forward' ? 'forward' : action)
+  if (action === 'title') return getTitle()
+  if (action === 'text') return getText()
+  if (action === 'snapshot') return getSnapshot()
+  if (action === 'click') return clickSelector(params.selector)
+  if (action === 'type') return typeSelector(params.selector, params.text)
+  if (action === 'fill_form') return fillForm(params)
+  if (action === 'drag') return dragElement(params)
+  if (action === 'hover' || action === 'focus' || action === 'clear' || action === 'select_option') return interact(action, params)
+  if (action === 'press' || action === 'press_key') return pressKey(params.key || params.text)
+  if (action === 'scroll') return scrollPage(params)
+  if (action === 'exists' || action === 'count' || action === 'get_attribute' || action === 'extract') return inspectDom(action, params)
+  if (action === 'html') return getHtml(params.selector)
+  if (action === 'evaluate') return evaluatePage(params.code || params.text)
+  if (action === 'search_and_read') return searchAndRead(params.query || params.text)
+  if (action === 'wait_for') return waitForTarget(params.selector, params.timeoutMs)
+  if (action === 'screenshot') return takeScreenshot(!!params.fullPage)
+  if (action === 'set_viewport' || action === 'resize') return setViewport(params)
+  if (action === 'pdf') return savePdf(params)
+  if (action === 'tabs' || action === 'new_tab' || action === 'switch_tab' || action === 'close_tab') return manageTabs(action, params)
+  if (action === 'cookies_get' || action === 'cookies_set' || action === 'cookies_clear') return manageCookies(action, params)
+  if (action === 'console_messages') return getConsoleMessages()
+  if (action === 'network_requests') return getNetworkRequests()
+  if (action === 'file_upload') return uploadFile(params)
+  if (action === 'file_download') return configureDownload(params)
+  if (action === 'clear_cache') return clearBrowserCache()
+  if (action === 'stop' || action === 'close') { await closeBrowser(); return '浏览器已关闭' }
+  throw new Error(`不支持的浏览器动作：${action}`)
+}
+
+async function runBatch(steps = []) {
+  if (!Array.isArray(steps) || !steps.length) throw new Error('batch steps 不能为空')
+  if (steps.length > 20) throw new Error('batch steps 最多 20 步')
+  const results = []
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index] || {}
+    if (String(step.action || '').toLowerCase() === 'batch') {
+      results.push({ index, ok: false, error: 'batch 不允许嵌套 batch' })
+      continue
+    }
+    try {
+      const text = await executeSingleAction(step)
+      results.push({ index, action: step.action, ok: true, text: String(text || '').slice(0, 2000) })
+    } catch (error) {
+      results.push({ index, action: step.action, ok: false, error: error.message || String(error) })
+    }
+  }
+  return JSON.stringify(results, null, 2)
+}
+
+async function fillForm(params = {}) {
+  const p = await ensurePage()
+  const fields = Array.isArray(params.fields) ? params.fields : []
+  if (!fields.length) {
+    if (params.selector) return typeSelector(params.selector, params.text)
+    throw new Error('fill_form 需要 fields 或 selector/text')
+  }
+  if (fields.length > 30) throw new Error('fill_form fields 最多 30 项')
+  for (const field of fields) {
+    const selector = requireSelector(field.selector)
+    const value = String(field.value ?? field.text ?? '')
+    if (value.length > 1000) throw new Error('字段输入文本过长')
+    await p.click(selector, { delay: 10 }).catch(() => {})
+    await p.$eval(selector, el => { if ('value' in el) el.value = ''; else el.textContent = '' }).catch(() => {})
+    await p.type(selector, value, { delay: 2 })
+  }
+  return `已填写表单字段：${fields.length} 个`
 }
 
 function runQueued(action) {
@@ -486,9 +647,10 @@ module.exports = {
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['start', 'stop', 'navigate', 'snapshot', 'click', 'type', 'screenshot', 'wait_for', 'open', 'title', 'text', 'close', 'url', 'reload', 'back', 'navigate_back', 'forward', 'hover', 'focus', 'press', 'press_key', 'clear', 'scroll', 'select_option', 'exists', 'count', 'get_attribute', 'extract', 'html', 'search_and_read', 'set_viewport', 'resize', 'pdf', 'tabs', 'new_tab', 'switch_tab', 'close_tab', 'cookies_get', 'cookies_set', 'cookies_clear', 'console_messages', 'network_requests', 'fill_form', 'file_upload', 'file_download'], description: '动作名称' },
+        action: { type: 'string', enum: ['start', 'stop', 'navigate', 'snapshot', 'click', 'type', 'screenshot', 'wait_for', 'open', 'title', 'text', 'close', 'url', 'reload', 'back', 'navigate_back', 'forward', 'navigate_forward', 'hover', 'focus', 'press', 'press_key', 'clear', 'scroll', 'select_option', 'drag', 'exists', 'count', 'get_attribute', 'extract', 'html', 'evaluate', 'batch', 'search_and_read', 'set_viewport', 'resize', 'pdf', 'tabs', 'new_tab', 'switch_tab', 'close_tab', 'cookies_get', 'cookies_set', 'cookies_clear', 'clear_cache', 'console_messages', 'network_requests', 'fill_form', 'file_upload', 'file_download'], description: '动作名称' },
         url: { type: 'string', description: 'navigate/open/new_tab 动作的 http/https URL' },
         selector: { type: 'string', description: 'click/type/wait_for/DOM 动作的 CSS 选择器' },
+        targetSelector: { type: 'string', description: 'drag 动作的目标 CSS 选择器' },
         text: { type: 'string', description: 'type 动作输入文本' },
         key: { type: 'string', description: 'press_key/press 动作的按键名' },
         attribute: { type: 'string', description: 'get_attribute 动作的属性名' },
@@ -502,6 +664,11 @@ module.exports = {
         query: { type: 'string', description: 'search_and_read 动作的搜索关键词' },
         limit: { type: 'number', description: 'extract 返回数量上限' },
         timeoutMs: { type: 'number', description: 'wait_for 动作等待毫秒数，默认 12000，最大 30000' },
+        code: { type: 'string', description: 'evaluate 动作的受限 JS 代码' },
+        steps: { type: 'array', description: 'batch 动作的步骤列表' },
+        fields: { type: 'array', description: 'fill_form 批量字段，形如 { selector, value }' },
+        path: { type: 'string', description: 'file_upload 的单个本地文件路径' },
+        paths: { type: 'array', description: 'file_upload 的多个本地文件路径' },
       },
       required: ['action'],
     },
@@ -509,32 +676,8 @@ module.exports = {
   async execute(params = {}) {
     return runQueued(async () => {
       const action = String(params.action || '').trim().toLowerCase()
-      if (action === 'start') { await ensurePage(); return '浏览器已启动' }
-      if (action === 'navigate' || action === 'open') return openUrl(params.url)
-      if (action === 'url') { const p = await ensurePage(); return p.url() }
-      if (action === 'reload' || action === 'back' || action === 'navigate_back' || action === 'forward') return navigateHistory(action)
-      if (action === 'title') return getTitle()
-      if (action === 'text') return getText()
-      if (action === 'snapshot') return getSnapshot()
-      if (action === 'click') return clickSelector(params.selector)
-      if (action === 'type' || action === 'fill_form') return typeSelector(params.selector, params.text)
-      if (action === 'hover' || action === 'focus' || action === 'clear' || action === 'select_option') return interact(action, params)
-      if (action === 'press' || action === 'press_key') return pressKey(params.key || params.text)
-      if (action === 'scroll') return scrollPage(params)
-      if (action === 'exists' || action === 'count' || action === 'get_attribute' || action === 'extract') return inspectDom(action, params)
-      if (action === 'html') return getHtml(params.selector)
-      if (action === 'search_and_read') return searchAndRead(params.query || params.text)
-      if (action === 'wait_for') return waitForTarget(params.selector, params.timeoutMs)
-      if (action === 'screenshot') return takeScreenshot(!!params.fullPage)
-      if (action === 'set_viewport' || action === 'resize') return setViewport(params)
-      if (action === 'pdf') return savePdf(params)
-      if (action === 'tabs' || action === 'new_tab' || action === 'switch_tab' || action === 'close_tab') return manageTabs(action, params)
-      if (action === 'cookies_get' || action === 'cookies_set' || action === 'cookies_clear') return manageCookies(action, params)
-      if (action === 'console_messages') return getConsoleMessages()
-      if (action === 'network_requests') return getNetworkRequests()
-      if (action === 'file_upload' || action === 'file_download') return '当前浏览器文件上传/下载需要额外运行时环境，本版本暂未启用。'
-      if (action === 'stop' || action === 'close') { await closeBrowser(); return '浏览器已关闭' }
-      throw new Error(`不支持的浏览器动作：${action}`)
+      if (action === 'batch') return runBatch(params.steps)
+      return executeSingleAction(params)
     })
   },
   dangerous: true,

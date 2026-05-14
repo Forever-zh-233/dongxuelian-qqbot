@@ -139,6 +139,10 @@ export default {
     provide('showAdminDialog', showAdminDialog)
 
     function doSwitchTab(id) {
+      if (id === 'agent') {
+        window.location.href = '/agent/'
+        return
+      }
       if (id === activeTab.value) return
       if (!tabs.value.some(item => item.id === id)) return
       if (tabSwitchLocked) return

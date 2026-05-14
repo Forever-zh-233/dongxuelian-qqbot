@@ -502,6 +502,15 @@ async function main() {
     agentMessages: path.join(LIB, 'agent', 'messages'),
     agentConfig: path.join(LIB, 'agent', 'config'),
     agentContext: path.join(LIB, 'agent', 'context'),
+    agentQueue: path.join(LIB, 'agent', 'queue'),
+    agentMemory: path.join(LIB, 'agent', 'memory'),
+    agentPush: path.join(LIB, 'agent', 'push'),
+    agentCron: path.join(LIB, 'agent', 'cron'),
+    agentPlanStore: path.join(LIB, 'agent', 'plan', 'plan-store'),
+    agentPlanEngine: path.join(LIB, 'agent', 'plan', 'plan-engine'),
+    agentPlanPrompts: path.join(LIB, 'agent', 'plan', 'plan-prompts'),
+    agentPlanTools: path.join(LIB, 'agent', 'plan', 'plan-tools'),
+    agentPlanRunner: path.join(LIB, 'agent', 'plan', 'plan-runner'),
     agentPathGuard: path.join(LIB, 'agent', 'path-guard'),
     agentSkills: path.join(LIB, 'agent', 'skills'),
     agentSkillHub: path.join(LIB, 'agent', 'skill-hub'),
@@ -521,6 +530,7 @@ async function main() {
     agentToolWriteFile: path.join(LIB, 'agent', 'tools', 'write-file'),
     agentToolEditFile: path.join(LIB, 'agent', 'tools', 'edit-file'),
     agentToolShell: path.join(LIB, 'agent', 'tools', 'shell'),
+    agentToolMemoryTools: path.join(LIB, 'agent', 'tools', 'memory-tools'),
     agentToolAppendFile: path.join(LIB, 'agent', 'tools', 'append-file'),
     agentToolGrepSearch: path.join(LIB, 'agent', 'tools', 'grep-search'),
     agentToolExecuteJavascript: path.join(LIB, 'agent', 'tools', 'execute-javascript'),
@@ -648,6 +658,33 @@ async function main() {
     ],
     agentContext: [
       'estimateTokens', 'truncateToolResult', 'externalizeToolResult', 'buildContextReport', 'compactMessages', 'compactOldToolResults', 'summarizeToolResult', 'estimateCacheHitRate',
+      'buildStructuredSummaryPrompt', 'mergeSummaryIntoMessages', 'compactWithLLM',
+    ],
+    agentQueue: [
+      'enqueueAgentTask', 'getAgentQueueStats', 'clearAgentQueue', 'configureAgentQueue', 'resetAgentQueueForTests',
+    ],
+    agentMemory: [
+      'remember', 'searchMemory', 'forgetMemory', 'listMemory', 'formatMemoryItems', 'tokenize',
+    ],
+    agentPush: [
+      'send', 'sendToAdmin', 'taskComplete', 'cronResult', 'getQuota', 'listPushLog',
+    ],
+    agentCron: [
+      'loadCrons', 'saveCrons', 'registerCron', 'unregisterCron', 'runCronNow', 'listCronHistory', 'startCronScheduler', 'stopCronScheduler', 'getNextRunAt', 'validateCronSchedule',
+    ],
+    agentPlanStore: [
+      'buildPlanId', 'safePlanId', 'normalizePlan', 'savePlan', 'loadPlan', 'listPlans', 'listActivePlans', 'getPlanStorageInfo',
+    ],
+    agentPlanEngine: [
+      'createPlan', 'updateTaskStatus', 'checkPlanStatus', 'finishPlan', 'abandonPlan', 'formatPlan',
+    ],
+    agentPlanPrompts: [
+      'buildPlanSystemPrompt', 'buildPlanCreatePrompt',
+    ],
+    agentPlanTools: [
+    ],
+    agentPlanRunner: [
+      'resumePlan', 'resolvePlan', 'getActiveTask',
     ],
     agentPathGuard: [
       'isAgentPathInside', 'getAgentPathAllowedRoots', 'assertExistingAgentPathInsideRoots', 'assertNewAgentPathInsideRoots', 'resolveAgentDefaultRoot',
@@ -659,7 +696,7 @@ async function main() {
       'listSkillHubItems', 'findSkillHubItem', 'setSkillHubEnabled', 'formatSkillHubItems',
     ],
     agentRouter: [
-      'heuristicRoute', 'llmRoute', 'isExplicitSearchRequest',
+      'heuristicRoute', 'llmRoute', 'isExplicitSearchRequest', 'buildExplicitSearchRunOptions',
     ],
     agentSessions: [
       'buildAgentSessionId', 'recordAgentSession', 'listAgentSessions', 'getAgentSession', 'clearAgentSessions',
@@ -674,8 +711,9 @@ async function main() {
       'getMode', 'setMode', 'getEffectivePolicy', 'check',
     ],
     agentToolRegistry: [
-      'getToolDefinitions', 'executeTool', 'getToolCount',
+      'getToolDefinitions', 'executeTool', 'getToolCount', 'getToolSummaries',
     ],
+    agentToolMemoryTools: [],
     agentToolAppendFile: ['execute'],
     agentToolGrepSearch: ['execute'],
     agentToolExecuteJavascript: ['execute'],
@@ -699,6 +737,8 @@ async function main() {
   check('jailbreak pattern groups exported', modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERN_GROUPS && typeof modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERN_GROUPS === 'object')
   check('jailbreak pattern list exported', Array.isArray(modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERNS) && modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERNS.length > 0)
   check('jailbreak combined regexp exported', modules.jailbreakRuleset.JAILBREAK_INPUT_RE instanceof RegExp)
+  check('agent plan tools array exported', Array.isArray(modules.agentPlanTools.tools) && modules.agentPlanTools.tools.length >= 5)
+  check('agent memory tools array exported', Array.isArray(modules.agentToolMemoryTools.tools) && modules.agentToolMemoryTools.tools.length >= 4)
   for (const toolModuleName of ['agentToolTime', 'agentToolCalculator', 'agentToolWebSearch', 'agentToolReadFile', 'agentToolListFiles', 'agentToolFindFiles', 'agentToolWriteFile', 'agentToolEditFile', 'agentToolShell', 'agentToolBrowserAction', 'agentToolAppendFile', 'agentToolGrepSearch', 'agentToolExecuteJavascript', 'agentToolSendFileToUser', 'agentToolGetTokenUsage', 'agentToolSetUserTimezone', 'agentToolQueryLogs']) {
     const tool = modules[toolModuleName]
     check(`${toolModuleName}.definition exported`, !!(tool && tool.definition && typeof tool.definition.name === 'string'))
@@ -758,6 +798,15 @@ async function main() {
     path.join(LIB, 'agent', 'messages.js'),
     path.join(LIB, 'agent', 'config.js'),
     path.join(LIB, 'agent', 'context.js'),
+    path.join(LIB, 'agent', 'queue.js'),
+    path.join(LIB, 'agent', 'memory.js'),
+    path.join(LIB, 'agent', 'push.js'),
+    path.join(LIB, 'agent', 'cron.js'),
+    path.join(LIB, 'agent', 'plan', 'plan-store.js'),
+    path.join(LIB, 'agent', 'plan', 'plan-engine.js'),
+    path.join(LIB, 'agent', 'plan', 'plan-prompts.js'),
+    path.join(LIB, 'agent', 'plan', 'plan-tools.js'),
+    path.join(LIB, 'agent', 'plan', 'plan-runner.js'),
     path.join(LIB, 'agent', 'path-guard.js'),
     path.join(LIB, 'agent', 'skills.js'),
     path.join(LIB, 'agent', 'skill-hub.js'),
@@ -777,6 +826,7 @@ async function main() {
     path.join(LIB, 'agent', 'tools', 'write-file.js'),
     path.join(LIB, 'agent', 'tools', 'edit-file.js'),
     path.join(LIB, 'agent', 'tools', 'shell.js'),
+    path.join(LIB, 'agent', 'tools', 'memory-tools.js'),
     path.join(LIB, 'agent', 'tools', 'append-file.js'),
     path.join(LIB, 'agent', 'tools', 'grep-search.js'),
     path.join(LIB, 'agent', 'tools', 'execute-javascript.js'),
@@ -791,7 +841,7 @@ async function main() {
     runSyntaxCheck(`node -c ${path.relative(ROOT, file)}`, file)
   }
 
-  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
+  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
   const functions = []
   for (const file of duplicateScanFiles) {
     const src = read(path.join(LIB, file))
@@ -1434,6 +1484,10 @@ async function main() {
   check('dashboard exposes agent config API', dashboardStandalone.includes("/dashboard/api/agent/config") && dashboardStandalone.includes("agent', 'config") && dashboardStandalone.includes("if (pathname === '/dashboard/api/agent/config' && req.method === 'GET')") && dashboardStandalone.includes('if (!requireAdmin(req, res)) return'))
   check('dashboard exposes compatible tools API', dashboardStandalone.includes("/dashboard/api/tools") && dashboardStandalone.includes("/enabled") && dashboardStandalone.includes("/pending"))
   check('dashboard exposes agent chat API', dashboardStandalone.includes("/dashboard/api/agent/chat") && dashboardStandalone.includes("agent', 'engine") && dashboardStandalone.includes('data.history'))
+  check('dashboard queues agent chat API', dashboardStandalone.includes("agent', 'queue") && dashboardStandalone.includes('queue.enqueueAgentTask'))
+  check('dashboard exposes agent files API', dashboardStandalone.includes("/dashboard/api/agent/files") && dashboardStandalone.includes('listAgentWorkspaceFiles') && dashboardStandalone.includes("/dashboard/api/agent/file/upload"))
+  check('dashboard exposes agent env API', dashboardStandalone.includes("/dashboard/api/agent/env") && dashboardStandalone.includes('getAgentEnvStatus') && dashboardStandalone.includes('apiKeyConfigured'))
+  check('dashboard admin verify returns access token for agent console', dashboardStandalone.includes('accessToken: createToken()'))
   check('dashboard exposes agent sessions API', dashboardStandalone.includes("/dashboard/api/agent/sessions") && dashboardStandalone.includes("agent', 'sessions") && dashboardStandalone.includes('listAgentSessions'))
   check('dashboard exposes agent confirm API', dashboardStandalone.includes("/dashboard/api/agent/confirm") && dashboardStandalone.includes('findPendingToolById'))
   check('dashboard agent API returns skill index', dashboardStandalone.includes("agent', 'skills") && dashboardStandalone.includes('listAgentSkills'))
@@ -1449,6 +1503,12 @@ async function main() {
   check('dashboard agent panel normalizes click event pending id', dashboardAgentPanelSrc.includes('normalizePendingId') && dashboardAgentPanelSrc.includes("typeof value === 'string'"))
   check('dashboard agent panel displays final agent reply shape', dashboardAgentPanelSrc.includes('getAgentReply') && dashboardAgentPanelSrc.includes('data?.reply || data?.result || data?.message'))
   check('dashboard agent panel exposes session and stats lists', dashboardAgentPanelSrc.includes('fetchAgentSessions') && dashboardAgentPanelSrc.includes('最近工具调用'))
+  const agentConsoleSrc = fs.existsSync(path.join(PKG_ROOT, 'agent-console', 'src', 'main.tsx')) ? read(path.join(PKG_ROOT, 'agent-console', 'src', 'main.tsx')) : ''
+  check('agent console exposes runtime config page', agentConsoleSrc.includes("id: 'runtime'") && agentConsoleSrc.includes('function RuntimePage') && agentConsoleSrc.includes('queue.maxGlobal'))
+  check('dashboard exposes deterministic plan action APIs', dashboardStandalone.includes("/dashboard/api/agent/plans") && dashboardStandalone.includes("/resume") && dashboardStandalone.includes("/abandon") && dashboardStandalone.includes("plan', 'plan-runner"))
+  check('dashboard plan create obeys plan mode switch', dashboardStandalone.includes("agent', 'config") && dashboardStandalone.includes('agentConfig.planMode?.enabled') && dashboardStandalone.includes('计划模式当前未开启'))
+  check('agent console exposes plan actions', agentConsoleSrc.includes('function PlansPage') && agentConsoleSrc.includes('api.createPlan') && agentConsoleSrc.includes('api.resumePlan') && agentConsoleSrc.includes('api.abandonPlan'))
+  check('agent console downloads files with authenticated fetch', agentConsoleSrc.includes('api.fileDownload') && !agentConsoleSrc.includes('fileDownloadUrl'))
   const skillHubCli = read(path.join(ROOT, 'scripts', 'skill-hub.js'))
   check('skill hub CLI exposes list/search/enable/disable', skillHubCli.includes('list|search') && skillHubCli.includes('enable') && skillHubCli.includes('disable'))
   const handlerSrc = read(path.join(LIB, 'handler.js'))
@@ -1457,6 +1517,7 @@ async function main() {
   check('browser action exposes plan action aliases', browserActionSrc.includes("'start'") && browserActionSrc.includes("'stop'") && browserActionSrc.includes("'navigate'") && browserActionSrc.includes("'wait_for'"))
   check('browser action exposes snapshot action', browserActionSrc.includes("'snapshot'") && browserActionSrc.includes('getSnapshot'))
   check('browser action exposes guarded interaction actions', browserActionSrc.includes("'click'") && browserActionSrc.includes('requireSelector') && browserActionSrc.includes("'screenshot'"))
+  check('browser action exposes phase3 browser actions', browserActionSrc.includes("'evaluate'") && browserActionSrc.includes("'batch'") && browserActionSrc.includes("'pdf'") && browserActionSrc.includes("'drag'") && browserActionSrc.includes("'file_upload'") && browserActionSrc.includes("'clear_cache'"))
   check('dashboard agent panel exposes auto route switch', dashboardAgentPanelSrc.includes('QQ 自动路由') && dashboardAgentPanelSrc.includes('config.autoRoute.qq.enabled'))
   check('dashboard rejects missing access password', dashboardStandalone.includes('access password is not configured'))
   check('restart-bot uses local koishi binary', restartBot.includes('node "$APP_DIR/node_modules/koishi/bin.js" start'))

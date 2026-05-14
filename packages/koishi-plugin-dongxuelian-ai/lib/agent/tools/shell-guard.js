@@ -4,8 +4,6 @@
  * 边界: 不执行命令，只返回违规列表。
  * 状态: 无运行时状态（纯函数）。
  */
-const os = require('os')
-
 // ============================================================
 // 类别1：数据销毁
 // ============================================================
@@ -154,6 +152,31 @@ const ALL_PROGRAMMATIC_CHECKS = [
   checkBackslashWhitespace,
 ]
 
+const CATEGORY_META = Object.freeze({
+  DATA_DESTRUCTION: { label: '数据销毁', description: '删除、移动、格式化、覆写磁盘等可能造成不可恢复数据损失的命令。' },
+  SYSTEM_DESTRUCTION: { label: '系统破坏', description: '重启、停机、服务管理、进程终止和 fork bomb 等会影响宿主稳定性的命令。' },
+  CODE_EXECUTION: { label: '代码执行绕过', description: '下载后执行、编码载荷、IFS、控制字符、危险 jq/zsh 能力等绕过手段。' },
+  NETWORK_ABUSE: { label: '网络滥用', description: '反向 Shell、/dev/tcp、nc -e、socat EXEC 等未授权隧道。' },
+  SENSITIVE_FILE: { label: '敏感文件访问', description: '访问 sudoers、authorized_keys、/proc/*/environ 等敏感系统位置。' },
+  PRIVILEGE_ESCALATION: { label: '权限提升', description: 'sudo/su/pkexec/runas 或全局权限破坏类命令。' },
+  SHELL_EVASION: { label: 'Shell 规避', description: '命令替换、混淆 flag、反斜杠操作符、异常换行和注释引号错位。' },
+  PROGRAMMATIC: { label: '程序化检查', description: '需要状态机解析的反引号注入和反斜杠空白混淆。' },
+})
+
+const CATEGORY_RULES = Object.freeze({
+  DATA_DESTRUCTION,
+  SYSTEM_DESTRUCTION,
+  CODE_EXECUTION,
+  NETWORK_ABUSE,
+  SENSITIVE_FILE,
+  PRIVILEGE_ESCALATION,
+  SHELL_EVASION,
+  PROGRAMMATIC: [
+    { id: 'SHELL_EVASION_BACKTICK', sev: 'high', desc: '命令包含单引号外反引号命令替换，可执行任意命令' },
+    { id: 'SHELL_EVASION_BACKSLASH_WHITESPACE', sev: 'high', desc: '检测反斜杠转义的空白字符，可能用于混淆命令' },
+  ],
+})
+
 // ============================================================
 // 主检查函数
 // ============================================================
@@ -178,6 +201,7 @@ function checkShellCommand(command) {
         id: rule.id,
         severity: rule.sev,
         description: rule.desc,
+        category: getRuleCategory(rule.id),
       })
     }
   }
@@ -190,6 +214,7 @@ function checkShellCommand(command) {
         id: result.id,
         severity: result.sev,
         description: result.desc,
+        category: getRuleCategory(result.id),
       })
     }
   }
@@ -221,10 +246,47 @@ function isCommandSafe(command) {
   return !result.blocked && result.violations.length === 0
 }
 
+function getRuleCategory(ruleId = '') {
+  const id = String(ruleId || '')
+  for (const [category, rules] of Object.entries(CATEGORY_RULES)) {
+    if (rules.some(rule => rule.id === id)) return category
+  }
+  return 'UNKNOWN'
+}
+
+function listShellGuardRules() {
+  return Object.entries(CATEGORY_RULES).map(([category, rules]) => {
+    const meta = CATEGORY_META[category] || { label: category, description: '' }
+    return {
+      category,
+      label: meta.label,
+      description: meta.description,
+      count: rules.length,
+      rules: rules.map(rule => ({
+        id: rule.id,
+        severity: rule.sev,
+        description: rule.desc,
+      })),
+    }
+  })
+}
+
+function summarizeShellCommand(command = '', max = 220) {
+  const redacted = String(command || '')
+    .replace(/(sk|tp)-[A-Za-z0-9_-]{12,}/g, '$1-***')
+    .replace(/(api[_-]?key|token|password|passwd|pwd)\s*=\s*["']?[^"'\s;&|]+/ig, '$1=***')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (redacted.length <= max) return redacted
+  return redacted.slice(0, max - 3) + '...'
+}
+
 module.exports = {
   checkShellCommand,
   isCommandSafe,
   ALL_REGEX_RULES,
+  listShellGuardRules,
+  summarizeShellCommand,
   // 导出各分类供 Dashboard 展示
   categories: {
     DATA_DESTRUCTION,

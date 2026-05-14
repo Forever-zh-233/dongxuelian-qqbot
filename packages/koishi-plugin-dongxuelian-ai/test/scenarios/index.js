@@ -12,6 +12,7 @@ const concurrency = require('./concurrency.test')
 const setup = require('./setup.test')
 const personaPrompt = require('./persona-prompt.test')
 const sendGuard = require('./send-guard.test')
+const agentPhase3 = require('./agent-phase3.test')
 
 const SCENARIOS = [
   command,
@@ -28,6 +29,7 @@ const SCENARIOS = [
   setup,
   personaPrompt,
   sendGuard,
+  agentPhase3,
 ]
 
 async function runScenarioTests(t) {

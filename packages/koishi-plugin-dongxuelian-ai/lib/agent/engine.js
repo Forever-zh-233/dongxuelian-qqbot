@@ -7,7 +7,7 @@
 const { requestChatCompletions } = require('../api')
 const { loadConfig } = require('../runtime-config')
 const { getToolDefinitions, executeTool, toolRegistry } = require('./tools/registry')
-const { estimateTokens, externalizeToolResult, compactMessages } = require('./context')
+const { estimateTokens, externalizeToolResult, compactWithLLM } = require('./context')
 const { recordCall } = require('./stats')
 const safety = require('./safety')
 const pending = require('./pending')
@@ -28,7 +28,7 @@ function normalizeToolCall(toolName, args = {}) {
   }
 }
 
-async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount }) {
+async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount, bot }) {
   let args = {}
   try { args = JSON.parse(tc.function.arguments || '{}') } catch {}
   const toolName = tc.function.name
@@ -61,7 +61,7 @@ async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, c
 
   try {
     const startedAt = Date.now()
-    const execResult = await executeTool(toolName, args, { channel, channelKey, userId, userName })
+    const execResult = await executeTool(toolName, args, { channel, channelKey, userId, userName, bot })
     let nextToolCount = toolCount
     recordCall(toolName, channel, { ok: execResult.ok, durationMs: Date.now() - startedAt, tokens: estimateTokens([{ role: 'tool', content: execResult.text }]) })
     if (execResult.ok) nextToolCount++
@@ -79,7 +79,7 @@ async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, c
   }
 }
 
-async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, onProgress }) {
+async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, onProgress, bot }) {
   let reply = ''
   for (let round = 0; round < MAX_ROUNDS; round++) {
     let response
@@ -112,7 +112,7 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
       let currentCall = tc
       let fallbackDepth = 0
       while (currentCall && fallbackDepth < 2) {
-        const outcome = await executeAgentToolCall({ tc: currentCall, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount })
+        const outcome = await executeAgentToolCall({ tc: currentCall, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount, bot })
         toolCount = outcome.toolCount
         if (outcome.status === 'pending') {
           recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId })
@@ -136,7 +136,7 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
 
     let estimated = estimateTokens(messages)
     if (estimated > 60000) {
-      messages.splice(0, messages.length, ...compactMessages(messages, 24))
+      messages.splice(0, messages.length, ...await compactWithLLM(messages, config, requestChatCompletions))
       estimated = estimateTokens(messages)
     }
     if (estimated > 80000) { reply = '(上下文过大，Agent 已中止)'; break }
@@ -158,6 +158,7 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
  * @param {object} [opts.systemExtra=[]] - 额外 system 消息
  * @param {Array} [opts.history=[]] - 额外对话历史
  * @param {object} [opts.onProgress] - 每轮回调
+ * @param {object} [opts.bot] - 可选 Koishi bot，用于计划完成/cron 等主动推送
  * @returns {{ reply: string, toolCalls: number, pendingId: string|null }}
  */
 function ensureToolDefinition(tools, toolName) {
@@ -169,7 +170,7 @@ function getForceToolSet(forceTools) {
   return new Set((Array.isArray(forceTools) ? forceTools : []).filter(name => toolRegistry[name]))
 }
 
-async function runAgent({ userMessage, userName, userId, channelKey, channel = 'qq', systemExtra = [], history = [], forceTools = [], preExecuteTools = [], onProgress }) {
+async function runAgent({ userMessage, userName, userId, channelKey, channel = 'qq', systemExtra = [], history = [], forceTools = [], preExecuteTools = [], onProgress, bot }) {
   if (!isChannelEnabled(channel)) return { reply: '(Agent 已关闭)', toolCalls: 0, pendingId: null }
   let tools = getToolDefinitions(channel)
   const forceToolSet = getForceToolSet(forceTools)
@@ -187,17 +188,17 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
       content: null,
       tool_calls: [{ id: call.id, type: call.type, function: call.function }],
     })
-    const outcome = await executeAgentToolCall({ tc: call, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount: 0 })
+    const outcome = await executeAgentToolCall({ tc: call, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount: 0, bot })
     if (outcome.status === 'pending') {
       recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply: outcome.reply, toolCalls: 0, pendingId: outcome.pendingId })
       return { reply: outcome.reply, toolCalls: 0, pendingId: outcome.pendingId }
     }
     messages.push({ role: 'tool', tool_call_id: call.id, content: externalizeToolResult(outcome.result, call.function.name) })
   }
-  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, onProgress })
+  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, onProgress, bot })
 }
 
-async function resumePending({ channelKey, userId, channel = 'qq', expectedId = '', onProgress }) {
+async function resumePending({ channelKey, userId, channel = 'qq', expectedId = '', onProgress, bot }) {
   const executed = await pending.executePendingTool(channelKey, userId, channel, expectedId)
   if (!executed.pending) return executed
   const p = executed.pending
@@ -222,6 +223,7 @@ async function resumePending({ channelKey, userId, channel = 'qq', expectedId = 
     userMessage: resume.userMessage || '',
     toolCount: (resume.toolCount || 0) + (executed.ok ? 1 : 0),
     onProgress,
+    bot,
   })
 }
 

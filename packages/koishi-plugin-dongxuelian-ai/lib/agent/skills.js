@@ -6,13 +6,14 @@
  */
 const fs = require('fs')
 const path = require('path')
-const { SKILLS_CORE_DIR, SKILLS_MODES_DIR, SKILLS_PERSONAS_DIR, SKILLS_LORE_DIR } = require('../constants')
+const { SKILLS_DIR, SKILLS_CORE_DIR, SKILLS_MODES_DIR, SKILLS_PERSONAS_DIR, SKILLS_LORE_DIR } = require('../constants')
 
 const SKILL_DIRS = [
   { kind: 'core', dir: SKILLS_CORE_DIR },
   { kind: 'mode', dir: SKILLS_MODES_DIR },
   { kind: 'persona', dir: SKILLS_PERSONAS_DIR },
   { kind: 'lore', dir: SKILLS_LORE_DIR },
+  { kind: 'docs', dir: path.join(SKILLS_DIR, 'docs') },
 ]
 
 function parseFrontmatter(text) {
@@ -38,23 +39,31 @@ function listAgentSkills() {
   for (const group of SKILL_DIRS) {
     let entries = []
     try { entries = fs.readdirSync(group.dir, { withFileTypes: true }) } catch { continue }
-    for (const entry of entries) {
-      if (!entry.isFile() || !/^SKILL\..+\.md$/i.test(entry.name)) continue
-      const file = path.join(group.dir, entry.name)
-      let content = ''
-      try { content = fs.readFileSync(file, 'utf8') } catch {}
-      const meta = parseFrontmatter(content)
-      skills.push({
-        kind: group.kind,
-        file,
-        name: meta.name || entry.name.replace(/^SKILL\.|\.md$/gi, ''),
-        description: meta.description || '',
-        excerpt: stripFrontmatter(content).slice(0, 2400),
-        enabled: meta.enabled !== 'false',
-      })
-    }
+    for (const entry of entries) collectSkillEntry(skills, group, entry, group.dir)
   }
   return skills
+}
+
+function collectSkillEntry(skills, group, entry, baseDir) {
+  const full = path.join(baseDir, entry.name)
+  if (entry.isDirectory()) {
+    let nested = []
+    try { nested = fs.readdirSync(full, { withFileTypes: true }) } catch { return }
+    for (const item of nested) collectSkillEntry(skills, group, item, full)
+    return
+  }
+  if (!entry.isFile() || !/^SKILL\..+\.md$/i.test(entry.name)) return
+  let content = ''
+  try { content = fs.readFileSync(full, 'utf8') } catch {}
+  const meta = parseFrontmatter(content)
+  skills.push({
+    kind: group.kind,
+    file: full,
+    name: meta.name || entry.name.replace(/^SKILL\.|\.md$/gi, ''),
+    description: meta.description || '',
+    excerpt: stripFrontmatter(content).slice(0, 2400),
+    enabled: meta.enabled !== 'false',
+  })
 }
 
 function buildAgentSkillSummary(enabledNames = []) {

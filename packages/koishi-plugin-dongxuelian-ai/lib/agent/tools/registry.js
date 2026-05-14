@@ -21,9 +21,11 @@ const sendFileToUserTool = require('./send-file-to-user')
 const getTokenUsageTool = require('./get-token-usage')
 const setUserTimezoneTool = require('./set-user-timezone')
 const queryLogsTool = require('./query-logs')
+const planTools = require('../plan/plan-tools')
+const memoryTools = require('./memory-tools')
 const { getAgentConfig } = require('../config')
 
-const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool]
+const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool, ...planTools.tools, ...memoryTools.tools]
 
 const TOOL_TIMEOUT_MS = 90000
 
@@ -74,4 +76,25 @@ async function executeTool(toolName, params = {}, context = {}) {
 
 function getToolCount() { return tools.length }
 
-module.exports = { getToolDefinitions, executeTool, toolRegistry, getToolCount }
+function getToolSummaries(channel = '') {
+  const config = getAgentConfig()
+  return tools.map(tool => {
+    const name = tool.definition.name
+    const defaultChannels = tool.defaultChannels || ['dashboard', 'qq']
+    const channels = {}
+    for (const key of Object.keys(config.channels || {})) channels[key] = !!config.channels[key]?.tools?.[name]
+    return {
+      name,
+      description: tool.definition.description || '',
+      dangerous: !!tool.dangerous,
+      readOnly: !tool.dangerous && !/write|edit|append|shell|javascript|browser|cookie|memory|plan/i.test(name),
+      write: /write|edit|append|shell|javascript|remember|forget|create_plan|update_task_status|finish_plan|abandon_plan/i.test(name),
+      external: name === 'web_search' || name === 'browser_action',
+      defaultChannels,
+      channels,
+      enabled: channel ? !!config.channels?.[channel]?.tools?.[name] : undefined,
+    }
+  })
+}
+
+module.exports = { getToolDefinitions, executeTool, toolRegistry, getToolCount, getToolSummaries }

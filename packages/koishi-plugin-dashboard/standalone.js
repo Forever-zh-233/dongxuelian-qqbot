@@ -47,6 +47,8 @@ const LORES_DIR = path.join(DATA_DIR, 'ai-skills', 'lore')
 const MODES_DIR = path.join(DATA_DIR, 'ai-skills', 'modes')
 const FE_DIR = path.join(PLUGIN_ROOT, 'frontend')
 const DIST_DIR = path.join(FE_DIR, 'dist')
+const AGENT_CONSOLE_DIR = path.join(PLUGIN_ROOT, '..', 'agent-console')
+const AGENT_CONSOLE_DIST_DIR = path.join(AGENT_CONSOLE_DIR, 'dist')
 const PORT = process.env.DASHBOARD_PORT || 5150
 const PASSWORD = process.env.DASHBOARD_PASSWORD || '123'
 const ADMIN_PASSWORD = process.env.DASHBOARD_ADMIN_PASSWORD || '123'
@@ -69,6 +71,114 @@ const NPM_PROXY_ENV_KEYS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_prox
 const MAX_LOG_LIMIT = 6000
 let logEntryCache = { file: '', size: -1, mtimeMs: -1, entries: [] }
 let npmDiagnosticsCache = { at: 0, data: null }
+
+function isAgentPathInside(target, root) {
+  const absTarget = path.resolve(String(target || ''))
+  const absRoot = path.resolve(String(root || ''))
+  const left = process.platform === 'win32' ? absTarget.toLowerCase() : absTarget
+  const right = process.platform === 'win32' ? absRoot.toLowerCase() : absRoot
+  return left === right || left.startsWith(right + path.sep)
+}
+
+async function resolveAgentWorkspacePath(target) {
+  const guard = require(path.join(AI_LIB, 'agent', 'path-guard'))
+  return guard.assertExistingAgentPathInsideRoots(String(target || ''), '路径')
+}
+
+async function resolveAgentUploadTarget(root, name) {
+  const guard = require(path.join(AI_LIB, 'agent', 'path-guard'))
+  const base = String(root || '').trim() || await guard.resolveAgentDefaultRoot()
+  const safeName = path.basename(String(name || '').replace(/[\\/:*?"<>|]+/g, '_')).slice(0, 160)
+  if (!safeName) throw new Error('文件名不能为空')
+  const target = path.join(base, safeName)
+  return guard.assertNewAgentPathInsideRoots(target, '上传文件', true)
+}
+
+async function listAgentWorkspaceFiles({ root, query = '', limit = 120 } = {}) {
+  const guard = require(path.join(AI_LIB, 'agent', 'path-guard'))
+  const base = root ? String(root) : await guard.resolveAgentDefaultRoot()
+  const { abs } = await guard.assertExistingAgentPathInsideRoots(base, '目录')
+  const stat = await fs.promises.stat(abs)
+  if (!stat.isDirectory()) throw new Error('不是目录：' + abs)
+  const max = Math.max(1, Math.min(300, parseInt(limit, 10) || 120))
+  const needle = String(query || '').trim().toLowerCase()
+  const ignored = new Set(['.git', 'node_modules', 'dist', 'dist-portable', 'tmp'])
+  const items = []
+  async function walk(dir, depth) {
+    if (items.length >= max || depth > 4) return
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (items.length >= max) return
+      if (entry.isDirectory() && ignored.has(entry.name)) continue
+      const full = path.join(dir, entry.name)
+      if (!isAgentPathInside(full, abs)) continue
+      const rel = path.relative(abs, full) || entry.name
+      const matches = !needle || rel.toLowerCase().includes(needle)
+      let itemStat = null
+      if (matches) itemStat = await fs.promises.stat(full).catch(() => null)
+      if (matches && itemStat) {
+        items.push({
+          path: full,
+          rel,
+          name: entry.name,
+          type: entry.isDirectory() ? 'dir' : entry.isFile() ? 'file' : 'other',
+          size: itemStat.size,
+          mtimeMs: itemStat.mtimeMs,
+          injectable: entry.isFile() && itemStat.size <= 512 * 1024,
+        })
+      }
+      if (entry.isDirectory()) await walk(full, depth + 1)
+    }
+  }
+  await walk(abs, 0)
+  return { root: abs, files: items }
+}
+
+async function previewAgentWorkspaceFile(target) {
+  const { abs } = await resolveAgentWorkspacePath(target)
+  const stat = await fs.promises.stat(abs)
+  if (!stat.isFile()) throw new Error('不是文件：' + abs)
+  const meta = { path: abs, name: path.basename(abs), size: stat.size, mtimeMs: stat.mtimeMs, binary: false, truncated: false, content: '' }
+  if (stat.size > 512 * 1024) {
+    meta.truncated = true
+    return meta
+  }
+  const buffer = await fs.promises.readFile(abs)
+  if (buffer.includes(0)) {
+    meta.binary = true
+    return meta
+  }
+  const content = buffer.toString('utf8')
+  meta.truncated = content.length > 12000
+  meta.content = content.slice(0, 12000)
+  return meta
+}
+
+function getAgentEnvStatus() {
+  const constants = require(path.join(AI_LIB, 'constants'))
+  const files = [
+    ['ai-openai-key.txt', constants.KEY_FILE],
+    ['ai-deepseek-key.txt', constants.DEEPSEEK_KEY_FILE],
+    ['ai-dashscope-key.txt', constants.DASHSCOPE_KEY_FILE],
+    ['ai-glm-key.txt', constants.GLM_KEY_FILE],
+    ['ai-mimorium-key.txt', constants.MIMORIUM_KEY_FILE],
+    ['ai-provider.txt', constants.PROVIDER_FILE],
+    ['ai-model.txt', constants.MODEL_FILE],
+    ['ai-base-url.txt', constants.BASE_URL_FILE],
+    ['ai-enable-search.txt', constants.SEARCH_ENABLED_FILE],
+  ]
+  return files.map(([name, file]) => {
+    const exists = fs.existsSync(file)
+    let size = 0
+    let configured = false
+    try {
+      const stat = fs.statSync(file)
+      size = stat.size
+      configured = stat.size > 0 && String(fs.readFileSync(file, 'utf8')).trim().length > 0
+    } catch {}
+    return { name, exists, configured, size }
+  })
+}
 
 function isPackagedLocalWorkspace() {
   return /^(?:1|true|yes|on)$/i.test(String(process.env.LIANLIAN_PACKAGED || '').trim())
@@ -2549,7 +2659,7 @@ function napcatRespond(res, proxyRes, token) {
 }
 
 // ====== HTTP 服务器 ======
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
   const pathname = url.pathname
 
@@ -2584,11 +2694,11 @@ const server = http.createServer((req, res) => {
 
   // 管理员验证（不需要普通登录）
   if (pathname === '/dashboard/api/admin/verify' && req.method === 'POST') {
-    if (isLocalAuthBypass(req)) return json(res, { ok: true, token: createAdminToken() })
+    if (isLocalAuthBypass(req)) return json(res, { ok: true, token: createAdminToken(), accessToken: createToken() })
     collectBody(req, res, (body) => {
       try {
         const { password } = JSON.parse(body)
-        if (password === getAdminPassword()) return json(res, { ok: true, token: createAdminToken() })
+        if (password === getAdminPassword()) return json(res, { ok: true, token: createAdminToken(), accessToken: createToken() })
         return json(res, { ok: false, message: '管理员密码错误' }, 401)
       } catch { return json(res, { ok: false, message: '无效请求' }, 400) }
     })
@@ -3207,17 +3317,239 @@ const server = http.createServer((req, res) => {
       const effectiveReadRoots = Array.isArray(agentConfig.readFileRoots) && agentConfig.readFileRoots.length ? agentConfig.readFileRoots : [process.cwd()]
       const qqEnabledTools = new Set(registry.getToolDefinitions('qq').map(item => item.function.name))
       const dashboardEnabledTools = new Set(registry.getToolDefinitions('dashboard').map(item => item.function.name))
-      const tools = Object.values(registry.toolRegistry).map(tool => ({
-        name: tool.definition.name,
-        description: tool.definition.description || '',
-        dangerous: !!tool.dangerous,
-        external: tool.definition.name === 'web_search',
-        defaultChannels: tool.defaultChannels || ['dashboard', 'qq'],
-        qqEnabled: qqEnabledTools.has(tool.definition.name),
-        dashboardEnabled: dashboardEnabledTools.has(tool.definition.name),
+      const tools = registry.getToolSummaries().map(tool => ({
+        ...tool,
+        qqEnabled: qqEnabledTools.has(tool.name),
+        dashboardEnabled: dashboardEnabledTools.has(tool.name),
       }))
       return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills, effectiveReadRoots })
     } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/stats' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const stats = require(path.join(AI_LIB, 'agent', 'stats')).getStats()
+      return json(res, { ok: true, stats })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/queue' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const queue = require(path.join(AI_LIB, 'agent', 'queue')).getAgentQueueStats()
+      return json(res, { ok: true, queue })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/files' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const query = url.searchParams.get('q') || ''
+      const root = url.searchParams.get('root') || ''
+      const limit = url.searchParams.get('limit') || 120
+      const result = await listAgentWorkspaceFiles({ root, query, limit })
+      return json(res, { ok: true, ...result })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+  }
+
+  if (pathname === '/dashboard/api/agent/file' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const file = url.searchParams.get('path') || ''
+      return json(res, { ok: true, file: await previewAgentWorkspaceFile(file) })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+  }
+
+  if (pathname === '/dashboard/api/agent/file/download' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const { abs } = await resolveAgentWorkspacePath(url.searchParams.get('path') || '')
+      const stat = await fs.promises.stat(abs)
+      if (!stat.isFile()) return json(res, { ok: false, message: '不是文件' }, 400)
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(path.basename(abs))}"`,
+      })
+      fs.createReadStream(abs).pipe(res)
+      return
+    } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+  }
+
+  if (pathname === '/dashboard/api/agent/file/upload' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const content = String(data.content || '')
+        if (content.length > 2 * 1024 * 1024) return json(res, { ok: false, message: '上传文件过大' }, 413)
+        const { abs } = await resolveAgentUploadTarget(data.root, data.name)
+        await fs.promises.mkdir(path.dirname(abs), { recursive: true })
+        await fs.promises.writeFile(abs, content, 'utf8')
+        return json(res, { ok: true, file: { path: abs, name: path.basename(abs), size: Buffer.byteLength(content) } })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/env' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const runtime = await require(path.join(AI_LIB, 'runtime-config')).loadConfig(true)
+      return json(res, {
+        ok: true,
+        env: getAgentEnvStatus(),
+        runtime: {
+          provider: runtime.provider,
+          model: runtime.model,
+          baseURL: runtime.baseURL,
+          apiKeyConfigured: !!runtime.apiKey,
+          searchEnabled: !!runtime.searchEnabled,
+        },
+      })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/shell-guard' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const guard = require(path.join(AI_LIB, 'agent', 'tools', 'shell-guard'))
+      const categories = guard.listShellGuardRules()
+      const ruleCount = categories.reduce((sum, item) => sum + item.count, 0)
+      return json(res, { ok: true, enabled: true, ruleCount, categories })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/plans' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const plans = await require(path.join(AI_LIB, 'agent', 'plan', 'plan-store')).listPlans(80)
+      return json(res, { ok: true, plans })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  const planDetailMatchApi = pathname.match(/^\/dashboard\/api\/agent\/plans\/([^/]+)$/)
+  if (planDetailMatchApi && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const plan = await require(path.join(AI_LIB, 'agent', 'plan', 'plan-store')).loadPlan(decodeURIComponent(planDetailMatchApi[1]))
+      if (!plan) return json(res, { ok: false, message: '计划不存在' }, 404)
+      return json(res, { ok: true, plan })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/plans' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const goal = String(data.goal || data.title || '').trim()
+        const rawTasks = Array.isArray(data.tasks) ? data.tasks : []
+        if (!goal && rawTasks.length === 0) return json(res, { ok: false, message: '计划目标不能为空。' }, 400)
+        const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig()
+        if (!agentConfig.planMode?.enabled) return json(res, { ok: false, message: '计划模式当前未开启。' }, 400)
+        const tasks = rawTasks.length
+          ? rawTasks.map(item => typeof item === 'string' ? { desc: item } : item)
+          : goal.split(/(?:[;；]|\n|，然后|然后|再)/).map(item => item.trim()).filter(Boolean).slice(0, 8).map(desc => ({ desc }))
+        const fallbackTasks = tasks.length >= 2 ? tasks : [
+          { desc: `理解目标：${goal}` },
+          { desc: '收集必要信息并执行可用工具' },
+          { desc: '整理结果并汇报完成状态' },
+        ]
+        const plan = await require(path.join(AI_LIB, 'agent', 'plan', 'plan-engine')).createPlan({
+          title: goal.slice(0, 80) || 'Dashboard Agent 计划',
+          tasks: fallbackTasks,
+          channel: 'dashboard',
+          channelKey: 'dashboard',
+          userId: String(data.userId || 'dashboard'),
+          userName: String(data.userName || 'Dashboard'),
+        })
+        return json(res, { ok: true, plan })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  const planResumeMatchApi = pathname.match(/^\/dashboard\/api\/agent\/plans\/([^/]+)\/resume$/)
+  if (planResumeMatchApi && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const result = await require(path.join(AI_LIB, 'agent', 'plan', 'plan-runner')).resumePlan({
+          planId: decodeURIComponent(planResumeMatchApi[1]),
+          channelKey: 'dashboard',
+          userId: String(data.userId || 'dashboard'),
+          userName: String(data.userName || 'Dashboard'),
+        })
+        return json(res, { ok: true, ...result })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  const planAbandonMatchApi = pathname.match(/^\/dashboard\/api\/agent\/plans\/([^/]+)\/abandon$/)
+  if (planAbandonMatchApi && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const plan = await require(path.join(AI_LIB, 'agent', 'plan', 'plan-engine')).abandonPlan({
+          planId: decodeURIComponent(planAbandonMatchApi[1]),
+          reason: data.reason || 'Agent Console 放弃计划',
+        })
+        return json(res, { ok: true, plan })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/push-log' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const log = require(path.join(AI_LIB, 'agent', 'push')).listPushLog(80)
+      return json(res, { ok: true, log })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/crons' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const cron = require(path.join(AI_LIB, 'agent', 'cron'))
+      const data = await cron.loadCrons()
+      const history = await cron.listCronHistory(50)
+      return json(res, { ok: true, crons: data.crons, history })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/crons' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const cron = await require(path.join(AI_LIB, 'agent', 'cron')).registerCron(data)
+        return json(res, { ok: true, cron })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  const cronRunMatchApi = pathname.match(/^\/dashboard\/api\/agent\/crons\/([^/]+)\/run$/)
+  if (cronRunMatchApi && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const result = await require(path.join(AI_LIB, 'agent', 'cron')).runCronNow(decodeURIComponent(cronRunMatchApi[1]))
+      return json(res, { ok: true, result })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+  }
+
+  const cronDeleteMatchApi = pathname.match(/^\/dashboard\/api\/agent\/crons\/([^/]+)$/)
+  if (cronDeleteMatchApi && req.method === 'DELETE') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const removed = await require(path.join(AI_LIB, 'agent', 'cron')).unregisterCron(decodeURIComponent(cronDeleteMatchApi[1]))
+      return json(res, { ok: true, removed })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
   }
 
   if (pathname === '/dashboard/api/agent/config' && req.method === 'PUT') {
@@ -3262,16 +3594,24 @@ const server = http.createServer((req, res) => {
         const message = String(data.message || '').trim()
         if (!message) return json(res, { ok: false, message: '消息不能为空' }, 400)
         const engine = require(path.join(AI_LIB, 'agent', 'engine'))
+        const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig()
+        const queue = require(path.join(AI_LIB, 'agent', 'queue'))
+        queue.configureAgentQueue(agentConfig.queue || {})
         const history = require(path.join(AI_LIB, 'agent', 'messages')).sanitizeAgentHistory(data.history)
         const searchRunOptions = require(path.join(AI_LIB, 'agent', 'router')).buildExplicitSearchRunOptions(message)
-        const result = await engine.run({
-          userMessage: message,
-          userName: String(data.userName || 'Dashboard'),
-          userId: 'dashboard',
+        const result = await queue.enqueueAgentTask({
           channelKey: 'dashboard',
-          channel: 'dashboard',
-          history,
-          ...searchRunOptions,
+          userId: String(data.userId || 'dashboard'),
+          timeoutMs: agentConfig.queue?.timeoutMs,
+          fn: () => engine.run({
+            userMessage: message,
+            userName: String(data.userName || 'Dashboard'),
+            userId: String(data.userId || 'dashboard'),
+            channelKey: 'dashboard',
+            channel: 'dashboard',
+            history,
+            ...searchRunOptions,
+          }),
         })
         return json(res, { ok: true, ...result })
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
@@ -3290,7 +3630,15 @@ const server = http.createServer((req, res) => {
         const p = expectedId ? findPendingById(expectedId) : pending.getPendingTool('dashboard', 'dashboard')
         if (!p) return json(res, { ok: false, message: '没有待确认工具' }, 404)
         const engine = require(path.join(AI_LIB, 'agent', 'engine'))
-        const result = await engine.resumePending({ channelKey: p.channelKey, userId: p.userId, channel: p.channel || 'dashboard', expectedId })
+        const queue = require(path.join(AI_LIB, 'agent', 'queue'))
+        const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig()
+        queue.configureAgentQueue(agentConfig.queue || {})
+        const result = await queue.enqueueAgentTask({
+          channelKey: p.channelKey,
+          userId: p.userId,
+          timeoutMs: agentConfig.queue?.timeoutMs,
+          fn: () => engine.resumePending({ channelKey: p.channelKey, userId: p.userId, channel: p.channel || 'dashboard', expectedId }),
+        })
         return json(res, { ok: !result.message || !!result.reply, toolName: p.toolName, reply: result.reply || '', result: result.reply || result.message || '', message: result.message || '' }, result.status || 200)
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })
@@ -4028,17 +4376,23 @@ const server = http.createServer((req, res) => {
     return
   }
 
-  const serveFile = (filePath) => {
+  if (pathname === '/agent') {
+    res.writeHead(302, { Location: '/agent/' })
+    res.end()
+    return
+  }
+
+  const serveStaticFile = (rootDir, filePath) => {
     try {
-      if (!isInsidePath(DIST_DIR, filePath)) {
+      if (!isInsidePath(rootDir, filePath)) {
         res.writeHead(403)
         res.end('Forbidden')
         return true
       }
       if (fs.statSync(filePath).isFile()) {
         const ext = path.extname(filePath)
-        const mime = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' }[ext] || 'application/octet-stream'
-        const rel = path.relative(DIST_DIR, filePath).replace(/\\/g, '/')
+        const mime = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' }[ext] || 'application/octet-stream'
+        const rel = path.relative(rootDir, filePath).replace(/\\/g, '/')
         const cache = rel === 'index.html' ? 'no-cache' : (rel.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600')
         res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': cache })
         res.end(fs.readFileSync(filePath))
@@ -4046,6 +4400,23 @@ const server = http.createServer((req, res) => {
       }
     } catch {}
     return false
+  }
+  const serveFile = (filePath) => serveStaticFile(DIST_DIR, filePath)
+  const serveAgentFile = (filePath) => serveStaticFile(AGENT_CONSOLE_DIST_DIR, filePath)
+
+  if (pathname.startsWith('/agent/')) {
+    let agentReqPath = pathname.replace(/^\/agent\/?/, '')
+    try { agentReqPath = decodeURIComponent(agentReqPath) } catch {}
+    if (serveAgentFile(path.join(AGENT_CONSOLE_DIST_DIR, agentReqPath || 'index.html'))) return
+    if (pathname.startsWith('/agent/assets/')) {
+      res.writeHead(404)
+      res.end('Not Found')
+      return
+    }
+    if (serveAgentFile(path.join(AGENT_CONSOLE_DIST_DIR, 'index.html'))) return
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Agent Console dist not found. Run npm run build --prefix packages/agent-console')
+    return
   }
   let reqPath = pathname.replace(/^\/dashboard\/?/, '')
   try { reqPath = decodeURIComponent(reqPath) } catch {}

@@ -69,6 +69,56 @@ function compactMessages(messages = [], maxMessages = 24) {
   return [first, summary, ...kept].filter(Boolean)
 }
 
+function buildStructuredSummaryPrompt(messages = []) {
+  const transcript = (Array.isArray(messages) ? messages : []).slice(-80).map((m, index) => {
+    const role = m.role || 'unknown'
+    const toolCalls = m.tool_calls ? `\n工具调用：${JSON.stringify(m.tool_calls).slice(0, 1200)}` : ''
+    const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')
+    return `#${index + 1} ${role}\n${String(content || '').slice(0, 3000)}${toolCalls}`
+  }).join('\n\n')
+  return [
+    '请把以下 Agent 上下文压缩为结构化摘要，必须保留用户目标、当前进度、关键事实、已做决策和下一步。',
+    '只输出 Markdown，格式必须包含以下标题：',
+    '## 目标',
+    '## 进度',
+    '## 关键事实',
+    '## 决策',
+    '## 下一步',
+    '',
+    transcript.slice(0, 50000),
+  ].join('\n')
+}
+
+function mergeSummaryIntoMessages(summary, recentMessages = []) {
+  const content = String(summary || '').trim()
+  const safeSummary = content || '## 目标\n未知\n\n## 进度\n已进行上下文压缩。\n\n## 关键事实\n无\n\n## 决策\n无\n\n## 下一步\n继续根据最近消息推进。'
+  const first = recentMessages.find(m => m && m.role === 'system') || null
+  const tail = recentMessages.filter(m => m && m !== first)
+  return [
+    first,
+    { role: 'system', content: `以下是较早 Agent 上下文的结构化摘要：\n${safeSummary.slice(0, 12000)}` },
+    ...compactOldToolResults(tail, 4, 1200),
+  ].filter(Boolean)
+}
+
+async function compactWithLLM(messages = [], config = {}, requestFn) {
+  if (!Array.isArray(messages) || messages.length <= 24) return messages.slice()
+  const recentMessages = messages.slice(-24)
+  if (typeof requestFn !== 'function') return compactMessages(messages, 24)
+  try {
+    const prompt = buildStructuredSummaryPrompt(messages)
+    const summary = await requestFn([
+      { role: 'system', content: prompt },
+      { role: 'user', content: '压缩以上 Agent 上下文。' },
+    ], config, { max_tokens: 1200, _fallbackSet: 'lightweight' })
+    if (!summary || typeof summary !== 'string') throw new Error('empty summary')
+    if (!/##\s*目标/.test(summary) || !/##\s*下一步/.test(summary)) throw new Error('bad summary shape')
+    return mergeSummaryIntoMessages(summary, recentMessages)
+  } catch {
+    return compactMessages(messages, 24)
+  }
+}
+
 function summarizeToolResult(text = '', toolName = 'tool', maxChars = 1200) {
   const s = String(text || '')
   if (s.length <= maxChars) return s
@@ -103,4 +153,4 @@ function estimateCacheHitRate(systemMessage = '', previousSystemMessage = '') {
   return Math.round((same / Math.max(current.length, previous.length)) * 1000) / 10
 }
 
-module.exports = { estimateTokens, truncateToolResult, externalizeToolResult, buildContextReport, compactMessages, compactOldToolResults, summarizeToolResult, estimateCacheHitRate }
+module.exports = { estimateTokens, truncateToolResult, externalizeToolResult, buildContextReport, compactMessages, buildStructuredSummaryPrompt, mergeSummaryIntoMessages, compactWithLLM, compactOldToolResults, summarizeToolResult, estimateCacheHitRate }

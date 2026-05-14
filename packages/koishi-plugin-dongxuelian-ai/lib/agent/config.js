@@ -33,6 +33,15 @@ const DEFAULT_CONFIG = Object.freeze({
         get_token_usage: true,
         set_user_timezone: false,
         query_logs: false,
+        create_plan: true,
+        update_task_status: true,
+        check_plan_status: true,
+        finish_plan: true,
+        abandon_plan: true,
+        remember_memory: false,
+        search_memory: false,
+        forget_memory: false,
+        list_memory: false,
       },
     },
     dashboard: {
@@ -55,6 +64,15 @@ const DEFAULT_CONFIG = Object.freeze({
         get_token_usage: true,
         set_user_timezone: true,
         query_logs: true,
+        create_plan: true,
+        update_task_status: true,
+        check_plan_status: true,
+        finish_plan: true,
+        abandon_plan: true,
+        remember_memory: true,
+        search_memory: true,
+        forget_memory: true,
+        list_memory: true,
       },
     },
   },
@@ -65,6 +83,27 @@ const DEFAULT_CONFIG = Object.freeze({
   },
   enabledSkills: [],
   readFileRoots: [],
+  queue: {
+    maxGlobal: 3,
+    maxPerChannel: 3,
+    maxPendingPerUser: 1,
+    timeoutMs: 90000,
+  },
+  planMode: {
+    enabled: true,
+    autoCreate: false,
+  },
+  push: {
+    enabled: false,
+    dailyLimit: 5,
+  },
+  cron: {
+    enabled: false,
+  },
+  memory: {
+    enabled: true,
+    adminOnly: true,
+  },
 })
 
 let configCache = null
@@ -114,7 +153,47 @@ function normalizeConfig(raw = {}) {
   const enabledSkills = Array.isArray(source.enabledSkills)
     ? source.enabledSkills.map(item => String(item || '').trim()).filter(Boolean).slice(0, 32)
     : defaults.enabledSkills
-  return { version: 1, channels, dangerousPolicy, autoRoute, enabledSkills, readFileRoots }
+  const queue = normalizeQueueConfig(source.queue, defaults.queue)
+  const planMode = normalizePlanModeConfig(source.planMode, defaults.planMode)
+  const push = normalizePushConfig(source.push, defaults.push)
+  const cron = { enabled: source.cron?.enabled === undefined ? defaults.cron.enabled : !!source.cron.enabled }
+  const memory = {
+    enabled: source.memory?.enabled === undefined ? defaults.memory.enabled : !!source.memory.enabled,
+    adminOnly: source.memory?.adminOnly === undefined ? defaults.memory.adminOnly : !!source.memory.adminOnly,
+  }
+  return { version: 1, channels, dangerousPolicy, autoRoute, enabledSkills, readFileRoots, queue, planMode, push, cron, memory }
+}
+
+function normalizeInteger(value, min, max, fallback) {
+  const number = parseInt(value, 10)
+  if (!Number.isFinite(number)) return fallback
+  return Math.max(min, Math.min(max, number))
+}
+
+function normalizeQueueConfig(value, defaults) {
+  const src = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return {
+    maxGlobal: normalizeInteger(src.maxGlobal, 1, 12, defaults.maxGlobal),
+    maxPerChannel: normalizeInteger(src.maxPerChannel, 1, 20, defaults.maxPerChannel),
+    maxPendingPerUser: normalizeInteger(src.maxPendingPerUser, 0, 10, defaults.maxPendingPerUser),
+    timeoutMs: normalizeInteger(src.timeoutMs, 5000, 10 * 60 * 1000, defaults.timeoutMs),
+  }
+}
+
+function normalizePlanModeConfig(value, defaults) {
+  const src = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return {
+    enabled: src.enabled === undefined ? defaults.enabled : !!src.enabled,
+    autoCreate: src.autoCreate === undefined ? defaults.autoCreate : !!src.autoCreate,
+  }
+}
+
+function normalizePushConfig(value, defaults) {
+  const src = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return {
+    enabled: src.enabled === undefined ? defaults.enabled : !!src.enabled,
+    dailyLimit: normalizeInteger(src.dailyLimit, 0, 100, defaults.dailyLimit),
+  }
 }
 
 function readConfigFile() {

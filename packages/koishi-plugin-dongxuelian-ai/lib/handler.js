@@ -783,26 +783,187 @@ async function handleCommand(session, ctx, state) {
     ].filter(Boolean).join('\n'))
   }
 
+  if (/^(?:\/plan|莲莲计划)\s+(.+)/i.test(plain)) {
+    const query = RegExp.$1.trim()
+    const planEngine = require('./agent/plan/plan-engine')
+    const planPrompts = require('./agent/plan/plan-prompts')
+    const engine = require('./agent/engine')
+    const agentConfig = require('./agent/config').getAgentConfig()
+    if (!agentConfig.planMode?.enabled) return handled('计划模式当前未开启。')
+    const userName = sanitizeUserName(session.author?.nick || session.author?.name || session.username || '群友')
+    const tasks = query
+      .split(/(?:；|;|\n|，然后|然后|再)/)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+    const fallbackTasks = tasks.length >= 2 ? tasks : [
+      `理解目标：${query}`,
+      '收集必要信息并执行可用工具',
+      '整理结果并汇报完成状态',
+    ]
+    try {
+      const plan = await planEngine.createPlan({ title: query.slice(0, 80), tasks: fallbackTasks.map(desc => ({ desc })), channel: 'qq', channelKey, userId: currentUserId, userName })
+      const agentQueue = require('./agent/queue')
+      agentQueue.configureAgentQueue(agentConfig.queue || {})
+      const result = await agentQueue.enqueueAgentTask({
+        channelKey,
+        userId: currentUserId,
+        timeoutMs: agentConfig.queue?.timeoutMs,
+        fn: () => engine.run({
+          userMessage: query,
+          userName,
+          userId: currentUserId,
+          channelKey,
+          channel: 'qq',
+          bot: session.bot,
+          systemExtra: [
+            { role: 'system', content: planPrompts.buildPlanSystemPrompt(plan) },
+            { role: 'system', content: planPrompts.buildPlanCreatePrompt(query) },
+          ],
+          forceTools: ['check_plan_status', 'update_task_status', 'finish_plan'],
+          preExecuteTools: [{ name: 'check_plan_status', args: { planId: plan.id } }],
+        }),
+      })
+      return handled([planEngine.formatPlan(plan), '', result.reply || '计划已创建，正在执行。'].join('\n'))
+    } catch (err) {
+      if (err && (err.code === 'AGENT_QUEUE_FULL' || err.code === 'AGENT_QUEUE_REJECTED')) return handled(err.message)
+      ctx.logger('dongxuelian-ai').warn(`plan mode failed: ${err.message}`)
+      return handled('计划模式暂时不可用。')
+    }
+  }
+
+  const planStatusMatch = plain.match(/^(?:计划查看|\/plans?)(?:\s+(plan_[a-zA-Z0-9_-]+))?$/i)
+  if (planStatusMatch) {
+    try {
+      const planEngine = require('./agent/plan/plan-engine')
+      return handled(planEngine.formatPlan(await planEngine.checkPlanStatus(planStatusMatch[1] || '')))
+    } catch (err) {
+      return handled(err.message || '计划查询失败。')
+    }
+  }
+
+  const planResumeMatch = plain.match(/^(?:计划继续|\/plan-resume)(?:\s+(plan_[a-zA-Z0-9_-]+))?$/i)
+  if (planResumeMatch) {
+    try {
+      const planEngine = require('./agent/plan/plan-engine')
+      const planRunner = require('./agent/plan/plan-runner')
+      const plan = await planRunner.resolvePlan(planResumeMatch[1] || '', { userId: currentUserId, channelKey })
+      if (!plan) return handled('当前没有可继续的执行中计划。')
+      if (plan.userId !== currentUserId && !hasAdminPermission(session)) return handled('只能继续自己的计划，或由 bot 管理员操作。')
+      const userName = sanitizeUserName(session.author?.nick || session.author?.name || session.username || plan.userName || '群友')
+      const result = await planRunner.resumePlan({ planId: plan.id, channelKey, userId: currentUserId, userName, bot: session.bot })
+      return handled([planEngine.formatPlan(plan), '', result.reply || '计划已继续执行。'].join('\n'))
+    } catch (err) {
+      if (err && (err.code === 'AGENT_QUEUE_FULL' || err.code === 'AGENT_QUEUE_REJECTED')) return handled(err.message)
+      ctx.logger('dongxuelian-ai').warn(`plan resume failed: ${err.message}`)
+      return handled(err.message || '计划继续失败。')
+    }
+  }
+
+  const planAbandonMatch = plain.match(/^(?:计划放弃|\/plan-abandon)\s+(plan_[a-zA-Z0-9_-]+)(?:\s+(.+))?$/i)
+  if (planAbandonMatch) {
+    try {
+      const planEngine = require('./agent/plan/plan-engine')
+      const plan = await planEngine.checkPlanStatus(planAbandonMatch[1])
+      if (plan.userId !== currentUserId && !hasAdminPermission(session)) return handled('只能放弃自己的计划，或由 bot 管理员操作。')
+      const abandoned = await planEngine.abandonPlan({ planId: planAbandonMatch[1], reason: planAbandonMatch[2] || '用户放弃计划' })
+      return handled(planEngine.formatPlan(abandoned))
+    } catch (err) {
+      return handled(err.message || '计划放弃失败。')
+    }
+  }
+
+  const memoryRememberMatch = plain.match(/^(?:莲莲记住|\/memory\s+remember)\s+(.+)/i)
+  if (memoryRememberMatch) {
+    const agentConfig = require('./agent/config').getAgentConfig()
+    if (!agentConfig.memory?.enabled) return handled('Agent 记忆当前未开启。')
+    if (agentConfig.memory?.adminOnly && !hasAdminPermission(session)) return handled('只有管理员能写入 Agent 长期记忆。')
+    try {
+      const item = await require('./agent/memory').remember({
+        userId: currentUserId,
+        channelKey,
+        text: memoryRememberMatch[1].trim(),
+      })
+      return handled(`已记住：${item.id}`)
+    } catch (err) {
+      return handled(err.message || '记忆写入失败。')
+    }
+  }
+
+  const memorySearchMatch = plain.match(/^(?:莲莲回忆|\/memory\s+search)\s*(.*)$/i)
+  if (memorySearchMatch) {
+    const agentConfig = require('./agent/config').getAgentConfig()
+    if (!agentConfig.memory?.enabled) return handled('Agent 记忆当前未开启。')
+    if (agentConfig.memory?.adminOnly && !hasAdminPermission(session)) return handled('只有管理员能检索 Agent 长期记忆。')
+    try {
+      const memory = require('./agent/memory')
+      const items = await memory.searchMemory({
+        userId: currentUserId,
+        channelKey,
+        query: memorySearchMatch[1].trim(),
+        limit: 8,
+      })
+      return handled(memory.formatMemoryItems(items))
+    } catch (err) {
+      return handled(err.message || '记忆检索失败。')
+    }
+  }
+
+  const memoryListMatch = plain.match(/^(?:莲莲记忆列表|\/memory\s+list)(?:\s+(\d+))?$/i)
+  if (memoryListMatch) {
+    const agentConfig = require('./agent/config').getAgentConfig()
+    if (!agentConfig.memory?.enabled) return handled('Agent 记忆当前未开启。')
+    if (agentConfig.memory?.adminOnly && !hasAdminPermission(session)) return handled('只有管理员能查看 Agent 长期记忆。')
+    try {
+      const memory = require('./agent/memory')
+      return handled(memory.formatMemoryItems(await memory.listMemory({ userId: currentUserId, limit: memoryListMatch[1] || 20 })))
+    } catch (err) {
+      return handled(err.message || '记忆列表读取失败。')
+    }
+  }
+
+  const memoryForgetMatch = plain.match(/^(?:莲莲忘记|\/memory\s+forget)\s+(mem_[a-zA-Z0-9_-]+)/i)
+  if (memoryForgetMatch) {
+    const agentConfig = require('./agent/config').getAgentConfig()
+    if (!agentConfig.memory?.enabled) return handled('Agent 记忆当前未开启。')
+    if (agentConfig.memory?.adminOnly && !hasAdminPermission(session)) return handled('只有管理员能删除 Agent 长期记忆。')
+    try {
+      const removed = await require('./agent/memory').forgetMemory({ userId: currentUserId, memoryId: memoryForgetMatch[1] })
+      return handled(removed ? '已删除这条记忆。' : '没有找到这条记忆。')
+    } catch (err) {
+      return handled(err.message || '记忆删除失败。')
+    }
+  }
+
   // === Agent 对话命令 ===
   const agentMatch = plain.match(/^莲莲\s*(?:工具|agent)\s+(.+)/i)
   if (agentMatch && !adminCommandMatched) {
     const query = agentMatch[1].trim()
     const engine = require('./agent/engine')
+    const agentConfig = require('./agent/config').getAgentConfig()
+    const agentQueue = require('./agent/queue')
+    agentQueue.configureAgentQueue(agentConfig.queue || {})
     const userName = sanitizeUserName(
       session.author?.nick || session.author?.name || session.username || '群友'
     )
     try {
       const searchRunOptions = require('./agent/router').buildExplicitSearchRunOptions(query)
-      const result = await engine.run({
-        userMessage: query, userName, userId: currentUserId, channelKey, channel: 'qq', ...searchRunOptions,
-        onProgress: (msg) => {
-          if (msg.type === 'round' && msg.round === 0) {
-            // 首轮执行中，不额外输出
-          }
-        },
+      const result = await agentQueue.enqueueAgentTask({
+        channelKey,
+        userId: currentUserId,
+        timeoutMs: agentConfig.queue?.timeoutMs,
+        fn: () => engine.run({
+          userMessage: query, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions,
+          onProgress: (msg) => {
+            if (msg.type === 'round' && msg.round === 0) {
+              // 首轮执行中，不额外输出
+            }
+          },
+        }),
       })
       return handled(result.reply || '(Agent 未获取有效回复)')
     } catch (err) {
+      if (err && (err.code === 'AGENT_QUEUE_FULL' || err.code === 'AGENT_QUEUE_REJECTED')) return handled(err.message)
       ctx.logger('dongxuelian-ai').warn(`agent engine failed: ${err.message}`)
       return handled('Agent 暂时不可用。')
     }
@@ -818,7 +979,7 @@ async function handleCommand(session, ctx, state) {
     if (p) {
       if (p.channelKey !== channelKey || p.userId !== currentUserId) return handled('这个确认 ID 不属于当前会话。')
       const engine = require('./agent/engine')
-      const result = await engine.resumePending({ channelKey, userId: currentUserId, channel: 'qq', expectedId: pendingId })
+      const result = await engine.resumePending({ channelKey, userId: currentUserId, channel: 'qq', expectedId: pendingId, bot: session.bot })
       if (!result.ok && result.message) return handled(`执行失败：${result.message || result.error || '未知错误'}`)
       return handled(result.reply || '(Agent 未获取到有效回复)')
     }
