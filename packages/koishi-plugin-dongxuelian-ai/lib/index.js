@@ -110,7 +110,7 @@ const {
   todayCst,
 } = require('./utils')
 const { logDebug } = require('./logging-config')
-const { llmRoute } = require('./agent/router')
+const { llmRoute, buildExplicitSearchRunOptions } = require('./agent/router')
 const agentEngine = require('./agent/engine')
 
 // @satorijs/core@3.7.0 缺少 stripped / parsed / resolve / send，这里随插件加载安装兼容补丁。
@@ -1088,7 +1088,8 @@ exports.apply = (ctx) => {
         const route = await llmRoute(userText, 'qq')
         if (route.useAgent) {
           logDebug(ctx, 'agent', `auto-route reason=${route.reason} channel=${channelKey}`)
-          const agentResult = await agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq' })
+          const searchRunOptions = buildExplicitSearchRunOptions(userText)
+          const agentResult = await agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', ...searchRunOptions })
           return safeSendReply(ctx, session, agentResult.reply || '(Agent 未获取有效回复)', randomTriggered)
         }
         const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds })

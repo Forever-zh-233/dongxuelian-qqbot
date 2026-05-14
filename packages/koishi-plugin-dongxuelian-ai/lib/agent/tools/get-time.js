@@ -1,6 +1,18 @@
 /**
  * MODULE: 获取当前时间工具。
  */
+const fs = require('fs')
+const path = require('path')
+const { DATA_DIR } = require('../../constants')
+
+function getUserTimezone(userId) {
+  if (!userId) return ''
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'agent-user-timezones.json'), 'utf8'))
+    return String(data[String(userId)] || '')
+  } catch { return '' }
+}
+
 module.exports = {
   definition: {
     name: 'get_current_time',
@@ -8,12 +20,13 @@ module.exports = {
     parameters: {
       type: 'object',
       properties: {
-        timezone: { type: 'string', description: '时区，默认 Asia/Shanghai' },
+        timezone: { type: 'string', description: '时区，默认用户偏好或 Asia/Shanghai' },
+        userId: { type: 'string', description: '用户 ID，用于读取时区偏好，可选' },
       },
     },
   },
   async execute(params = {}) {
-    const tz = params.timezone || 'Asia/Shanghai'
+    const tz = params.timezone || getUserTimezone(params.userId) || 'Asia/Shanghai'
     const now = new Date()
     const locale = now.toLocaleString('zh-CN', { timeZone: tz })
     const weekday = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()]

@@ -499,9 +499,14 @@ async function main() {
     sendGuard: path.join(LIB, 'send-guard'),
     healthCheck: path.join(LIB, 'health-check'),
     agentEngine: path.join(LIB, 'agent', 'engine'),
+    agentMessages: path.join(LIB, 'agent', 'messages'),
     agentConfig: path.join(LIB, 'agent', 'config'),
     agentContext: path.join(LIB, 'agent', 'context'),
+    agentPathGuard: path.join(LIB, 'agent', 'path-guard'),
     agentSkills: path.join(LIB, 'agent', 'skills'),
+    agentSkillHub: path.join(LIB, 'agent', 'skill-hub'),
+    agentRouter: path.join(LIB, 'agent', 'router'),
+    agentSessions: path.join(LIB, 'agent', 'sessions'),
     agentStats: path.join(LIB, 'agent', 'stats'),
     agentPending: path.join(LIB, 'agent', 'pending'),
     agentSafety: path.join(LIB, 'agent', 'safety'),
@@ -510,9 +515,19 @@ async function main() {
     agentToolCalculator: path.join(LIB, 'agent', 'tools', 'calculator'),
     agentToolWebSearch: path.join(LIB, 'agent', 'tools', 'web-search'),
     agentToolReadFile: path.join(LIB, 'agent', 'tools', 'read-file'),
+    agentToolListFiles: path.join(LIB, 'agent', 'tools', 'list-files'),
     agentToolBrowserAction: path.join(LIB, 'agent', 'tools', 'browser-action'),
     agentToolFindFiles: path.join(LIB, 'agent', 'tools', 'find-files'),
+    agentToolWriteFile: path.join(LIB, 'agent', 'tools', 'write-file'),
+    agentToolEditFile: path.join(LIB, 'agent', 'tools', 'edit-file'),
     agentToolShell: path.join(LIB, 'agent', 'tools', 'shell'),
+    agentToolAppendFile: path.join(LIB, 'agent', 'tools', 'append-file'),
+    agentToolGrepSearch: path.join(LIB, 'agent', 'tools', 'grep-search'),
+    agentToolExecuteJavascript: path.join(LIB, 'agent', 'tools', 'execute-javascript'),
+    agentToolSendFileToUser: path.join(LIB, 'agent', 'tools', 'send-file-to-user'),
+    agentToolGetTokenUsage: path.join(LIB, 'agent', 'tools', 'get-token-usage'),
+    agentToolSetUserTimezone: path.join(LIB, 'agent', 'tools', 'set-user-timezone'),
+    agentToolQueryLogs: path.join(LIB, 'agent', 'tools', 'query-logs'),
     index: path.join(LIB, 'index'),
     help: path.join(HELP, 'index'),
   }
@@ -554,7 +569,7 @@ async function main() {
       'getAvailablePersonals', 'loadPersonalSkill',
     ],
     api: [
-      'requestChatCompletions', 'buildFallbackConfig', 'getFallbackSteps',
+      'requestChatCompletions', 'normalizeMessagesForProvider', 'buildFallbackConfig', 'getFallbackSteps',
       'buildResponsesInput', 'extractResponsesText', 'requestOpenAIResponsesWithSearch',
       'isVisionModel', 'callGetImage', 'callGetForwardMsg', 'sendForwardMsg', 'getGroupMemberInfo', 'getGroupInfo', 'readImageAsBase64',
       'downloadImageAsBase64', 'extractImageFileFromElements',
@@ -622,30 +637,52 @@ async function main() {
       'markPlatformMute', 'clearPlatformMute', 'checkPlatformMuteStatus',
     ],
     agentEngine: [
-      'run',
+      'run', 'resumePending',
+    ],
+    agentMessages: [
+      'buildAgentMessages', 'sanitizeAgentHistory',
     ],
     agentConfig: [
       'getAgentConfig', 'saveAgentConfig', 'patchAgentConfig', 'setChannelEnabled', 'setToolEnabled',
-      'isChannelEnabled', 'isToolEnabled', 'getReadFileRoots', 'getDangerousPolicy', 'resetAgentConfigCache',
+      'isChannelEnabled', 'isToolEnabled', 'getReadFileRoots', 'getDangerousPolicy', 'isAutoRouteEnabled', 'getEnabledSkills', 'resetAgentConfigCache',
     ],
     agentContext: [
-      'estimateTokens', 'truncateToolResult', 'buildContextReport', 'compactMessages',
+      'estimateTokens', 'truncateToolResult', 'externalizeToolResult', 'buildContextReport', 'compactMessages', 'compactOldToolResults', 'summarizeToolResult', 'estimateCacheHitRate',
+    ],
+    agentPathGuard: [
+      'isAgentPathInside', 'getAgentPathAllowedRoots', 'assertExistingAgentPathInsideRoots', 'assertNewAgentPathInsideRoots', 'resolveAgentDefaultRoot',
     ],
     agentSkills: [
-      'listAgentSkills', 'parseFrontmatter',
+      'listAgentSkills', 'parseFrontmatter', 'buildAgentSkillSummary', 'stripFrontmatter',
+    ],
+    agentSkillHub: [
+      'listSkillHubItems', 'findSkillHubItem', 'setSkillHubEnabled', 'formatSkillHubItems',
+    ],
+    agentRouter: [
+      'heuristicRoute', 'llmRoute', 'isExplicitSearchRequest',
+    ],
+    agentSessions: [
+      'buildAgentSessionId', 'recordAgentSession', 'listAgentSessions', 'getAgentSession', 'clearAgentSessions',
     ],
     agentStats: [
       'recordCall', 'getStats',
     ],
     agentPending: [
-      'getPendingTool', 'setPendingTool', 'clearPendingTool', 'trimPendingTools',
+      'getPendingTool', 'findPendingToolById', 'getPendingToolById', 'setPendingTool', 'clearPendingTool', 'clearPendingToolById', 'trimPendingTools', 'listPendingTools', 'executePendingTool', 'confirmPendingTool',
     ],
     agentSafety: [
-      'getMode', 'setMode', 'check',
+      'getMode', 'setMode', 'getEffectivePolicy', 'check',
     ],
     agentToolRegistry: [
       'getToolDefinitions', 'executeTool', 'getToolCount',
     ],
+    agentToolAppendFile: ['execute'],
+    agentToolGrepSearch: ['execute'],
+    agentToolExecuteJavascript: ['execute'],
+    agentToolSendFileToUser: ['execute'],
+    agentToolGetTokenUsage: ['execute'],
+    agentToolSetUserTimezone: ['execute'],
+    agentToolQueryLogs: ['execute'],
   }
   for (const [moduleName, names] of Object.entries(expectedExports)) {
     const target = modules[moduleName]
@@ -662,7 +699,7 @@ async function main() {
   check('jailbreak pattern groups exported', modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERN_GROUPS && typeof modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERN_GROUPS === 'object')
   check('jailbreak pattern list exported', Array.isArray(modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERNS) && modules.jailbreakRuleset.JAILBREAK_INPUT_PATTERNS.length > 0)
   check('jailbreak combined regexp exported', modules.jailbreakRuleset.JAILBREAK_INPUT_RE instanceof RegExp)
-  for (const toolModuleName of ['agentToolTime', 'agentToolCalculator', 'agentToolWebSearch', 'agentToolReadFile', 'agentToolFindFiles', 'agentToolShell', 'agentToolBrowserAction']) {
+  for (const toolModuleName of ['agentToolTime', 'agentToolCalculator', 'agentToolWebSearch', 'agentToolReadFile', 'agentToolListFiles', 'agentToolFindFiles', 'agentToolWriteFile', 'agentToolEditFile', 'agentToolShell', 'agentToolBrowserAction', 'agentToolAppendFile', 'agentToolGrepSearch', 'agentToolExecuteJavascript', 'agentToolSendFileToUser', 'agentToolGetTokenUsage', 'agentToolSetUserTimezone', 'agentToolQueryLogs']) {
     const tool = modules[toolModuleName]
     check(`${toolModuleName}.definition exported`, !!(tool && tool.definition && typeof tool.definition.name === 'string'))
     check(`${toolModuleName}.execute exported`, typeof tool.execute === 'function')
@@ -718,9 +755,14 @@ async function main() {
     path.join(LIB, 'send-guard.js'),
     path.join(LIB, 'health-check.js'),
     path.join(LIB, 'agent', 'engine.js'),
+    path.join(LIB, 'agent', 'messages.js'),
     path.join(LIB, 'agent', 'config.js'),
     path.join(LIB, 'agent', 'context.js'),
+    path.join(LIB, 'agent', 'path-guard.js'),
     path.join(LIB, 'agent', 'skills.js'),
+    path.join(LIB, 'agent', 'skill-hub.js'),
+    path.join(LIB, 'agent', 'router.js'),
+    path.join(LIB, 'agent', 'sessions.js'),
     path.join(LIB, 'agent', 'stats.js'),
     path.join(LIB, 'agent', 'pending.js'),
     path.join(LIB, 'agent', 'safety.js'),
@@ -730,8 +772,18 @@ async function main() {
     path.join(LIB, 'agent', 'tools', 'web-search.js'),
     path.join(LIB, 'agent', 'tools', 'browser-action.js'),
     path.join(LIB, 'agent', 'tools', 'read-file.js'),
+    path.join(LIB, 'agent', 'tools', 'list-files.js'),
     path.join(LIB, 'agent', 'tools', 'find-files.js'),
+    path.join(LIB, 'agent', 'tools', 'write-file.js'),
+    path.join(LIB, 'agent', 'tools', 'edit-file.js'),
     path.join(LIB, 'agent', 'tools', 'shell.js'),
+    path.join(LIB, 'agent', 'tools', 'append-file.js'),
+    path.join(LIB, 'agent', 'tools', 'grep-search.js'),
+    path.join(LIB, 'agent', 'tools', 'execute-javascript.js'),
+    path.join(LIB, 'agent', 'tools', 'send-file-to-user.js'),
+    path.join(LIB, 'agent', 'tools', 'get-token-usage.js'),
+    path.join(LIB, 'agent', 'tools', 'set-user-timezone.js'),
+    path.join(LIB, 'agent', 'tools', 'query-logs.js'),
     path.join(HELP, 'index.js'),
     __filename,
   ]
@@ -739,7 +791,7 @@ async function main() {
     runSyntaxCheck(`node -c ${path.relative(ROOT, file)}`, file)
   }
 
-  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/config.js', 'agent/context.js', 'agent/skills.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/find-files.js', 'agent/tools/shell.js']
+  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
   const functions = []
   for (const file of duplicateScanFiles) {
     const src = read(path.join(LIB, file))
@@ -807,6 +859,11 @@ async function main() {
   checkEqual('extractResponsesText uses output_text', api.extractResponsesText({ output_text: ' hello ' }), 'hello')
   checkEqual('extractResponsesText reads nested content', api.extractResponsesText({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'nested' }] }] }), 'nested')
   checkThrows('extractResponsesText rejects empty response', () => api.extractResponsesText({ output: [] }), /Empty model response/)
+
+  const normalizedDashscope = api.normalizeMessagesForProvider([{ role: 'system', content: 'a' }, { role: 'system', content: 'b' }, { role: 'user', content: 'u' }], { baseURL: c.PROVIDERS.dashscope.baseURL })
+  check('api normalizes dashscope system messages', normalizedDashscope.length === 2 && normalizedDashscope[0].content.includes('a\n\nb'))
+  const normalizedOpen = api.normalizeMessagesForProvider([{ role: 'system', content: 'a' }, { role: 'system', content: 'b' }], { baseURL: 'https://api.deepseek.com' })
+  check('api preserves non-dashscope system messages', normalizedOpen.length === 2 && normalizedOpen[0].content === 'a')
 
   const originalFetch = global.fetch
   const originalWarn = console.warn
@@ -1064,20 +1121,65 @@ async function main() {
   check('agent qq exposes calculator tool', qqTools.includes('calculate'))
   check('agent qq web_search follows config', qqTools.includes('web_search') === modules.agentConfig.isToolEnabled('qq', 'web_search'))
   check('agent qq does not expose file read', !qqTools.includes('read_file'))
+  check('agent qq does not expose file list', !qqTools.includes('list_files'))
   check('agent qq does not expose file search', !qqTools.includes('find_files'))
+  check('agent qq does not expose file write', !qqTools.includes('write_file'))
+  check('agent qq does not expose file edit', !qqTools.includes('edit_file'))
   check('agent qq does not expose shell', !qqTools.includes('execute_shell'))
   check('agent dashboard exposes read file', dashboardTools.includes('read_file'))
+  check('agent dashboard exposes file list', dashboardTools.includes('list_files'))
   check('agent dashboard exposes file search', dashboardTools.includes('find_files'))
+  check('agent dashboard exposes write file', dashboardTools.includes('write_file'))
+  check('agent dashboard exposes edit file', dashboardTools.includes('edit_file'))
+  check('agent dashboard exposes grep search', dashboardTools.includes('grep_search'))
+  check('agent dashboard exposes token usage', dashboardTools.includes('get_token_usage'))
+  check('agent dashboard exposes log query', dashboardTools.includes('query_logs'))
   check('agent dashboard does not expose browser placeholder by default', !dashboardTools.includes('browser_action'))
   check('agent safety blocks unknown tool', modules.agentSafety.check('missing_tool').allowed === false)
   check('agent safety treats shell as dangerous', modules.agentSafety.DANGEROUS_TOOLS && modules.agentSafety.DANGEROUS_TOOLS.has('execute_shell'))
+  check('agent safety treats write_file as dangerous', modules.agentSafety.DANGEROUS_TOOLS && modules.agentSafety.DANGEROUS_TOOLS.has('write_file'))
+  check('agent safety treats edit_file as dangerous', modules.agentSafety.DANGEROUS_TOOLS && modules.agentSafety.DANGEROUS_TOOLS.has('edit_file'))
+  check('agent safety treats web_search as safe external tool', modules.agentSafety.DANGEROUS_TOOLS && !modules.agentSafety.DANGEROUS_TOOLS.has('web_search'))
   checkEqual('agent token estimate counts content', modules.agentContext.estimateTokens([{ role: 'user', content: 'hello' }]), 2)
   check('agent tool result truncates long output', modules.agentContext.truncateToolResult('x'.repeat(8100)).includes('结果截断'))
-  check('agent context compacts long message list', modules.agentContext.compactMessages(Array.from({ length: 40 }, (_, i) => ({ role: i ? 'user' : 'system', content: String(i) })), 10).length <= 12)
+  check('agent messages sanitizes history', modules.agentMessages.sanitizeAgentHistory([{ role: 'system', content: 'bad' }, { role: 'user', content: 'ok' }]).length === 1)
+  check('agent path guard detects child path', modules.agentPathGuard.isAgentPathInside(path.join(ROOT, 'packages'), ROOT))
+  const compactedAgentMessages = modules.agentContext.compactMessages([
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'older-user-goal' },
+    { role: 'tool', content: 'older-tool-result' },
+    ...Array.from({ length: 20 }, (_, i) => ({ role: 'assistant', content: String(i) })),
+  ], 10)
+  check('agent context compacts long message list', compactedAgentMessages.length <= 12)
+  check('agent context compact summary preserves old tool result', compactedAgentMessages.some(item => item.role === 'system' && item.content.includes('older-tool-result')))
+  check('agent context estimates cache hit rate', modules.agentContext.estimateCacheHitRate('abcdef', 'abcxyz') === 50)
+  check('agent context summarizes old tool results', modules.agentContext.compactOldToolResults([{ role: 'tool', content: 'x'.repeat(2000) }, { role: 'tool', content: 'recent' }], 1)[0].content.includes('结果摘要'))
+  const externalized = modules.agentContext.externalizeToolResult('x'.repeat(8100), 'cascade-test-tool', 100)
+  const externalizedPath = externalized.match(/完整结果已保存：(.+)\)$/)?.[1] || ''
+  check('agent context externalizes long tool results', externalized.includes('完整结果已保存') && fs.existsSync(externalizedPath))
+  if (externalizedPath) { try { fs.unlinkSync(externalizedPath) } catch {} }
   check('agent skills parses frontmatter name', modules.agentSkills.parseFrontmatter('---\nname: Demo\ndescription: Test\n---\nbody').name === 'Demo')
-  const pendingId = modules.agentPending.setPendingTool('g1', 'u1', { toolName: 'calculate', args: { expression: '1+1' } })
+  check('agent skill summary ignores empty selection', modules.agentSkills.buildAgentSkillSummary([]) === '')
+  check('agent skill hub formats empty list', modules.agentSkillHub.formatSkillHubItems([]).includes('未找到'))
+  modules.agentSessions.clearAgentSessions()
+  const sessionId = modules.agentSessions.recordAgentSession({ channel: 'dashboard', channelKey: 'dash', userId: 'u1', userMessage: 'hello', reply: 'world', toolCalls: 2 })
+  check('agent sessions records real session', modules.agentSessions.listAgentSessions().some(item => item.id === sessionId && item.toolCalls === 2))
+  check('agent auto route is disabled by default', !modules.agentRouter.heuristicRoute('现在几点了', 'qq').useAgent)
+  check('agent explicit search routes even when auto route disabled', modules.agentRouter.heuristicRoute('调用web_search查鸣潮最新角色是谁', 'qq').useAgent)
+  check('agent explicit search detector matches user wording', modules.agentRouter.isExplicitSearchRequest('帮我上网查查鸣潮最新角色是谁'))
+  const explicitSearchOptions = modules.agentRouter.buildExplicitSearchRunOptions('帮我查一下鸣潮最新角色是谁')
+  check('agent explicit search forces web_search execution', explicitSearchOptions.forceTools && explicitSearchOptions.forceTools.includes('web_search') && explicitSearchOptions.preExecuteTools?.[0]?.name === 'web_search')
+  check('agent explicit search cleans query prefix', explicitSearchOptions.preExecuteTools?.[0]?.args?.query === '鸣潮最新角色是谁')
+  await modules.agentConfig.patchAgentConfig({ autoRoute: { qq: { enabled: true }, dashboard: { enabled: false } } })
+  check('agent auto route detects time question when enabled', modules.agentRouter.heuristicRoute('现在几点了', 'qq').useAgent)
+  check('agent auto route ignores casual greeting', !modules.agentRouter.heuristicRoute('你好', 'qq').useAgent)
+  check('agent auto route marks weak tool question for LLM', modules.agentRouter.heuristicRoute('帮我看看这个怎么弄', 'qq').reason === 'needs-llm')
+  await modules.agentConfig.patchAgentConfig({ autoRoute: { qq: { enabled: false }, dashboard: { enabled: false } } })
+  const pendingId = modules.agentPending.setPendingTool('g1', 'u1', { toolName: 'calculate', args: { expression: '1+1' }, channel: 'qq' })
   check('agent pending stores id', typeof pendingId === 'string' && pendingId.startsWith('pnd'))
   checkEqual('agent pending retrieves tool name', modules.agentPending.getPendingTool('g1', 'u1').toolName, 'calculate')
+  check('agent pending lists queue without args', modules.agentPending.listPendingTools().some(item => item.id === pendingId && item.channel === 'qq' && item.args === undefined && item.argsSummary.includes('expression=1+1')))
+  check('agent pending finds by id', modules.agentPending.findPendingToolById(pendingId)?.toolName === 'calculate')
   modules.agentPending.clearPendingTool('g1', 'u1')
   checkEqual('agent pending clears request', modules.agentPending.getPendingTool('g1', 'u1'), null)
   checkEqual('agent calculator computes simple expression', await modules.agentToolCalculator.execute({ expression: '0.1 + 0.2' }), '0.3')
@@ -1091,28 +1193,120 @@ async function main() {
   const agentTmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cascade-agent-'))
   try {
     process.env.DONGXUELIAN_AI_DATA_DIR = agentTmp
-    for (const rel of ['constants', 'agent/config', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/find-files', 'agent/safety']) {
+    for (const rel of ['constants', 'runtime-config', 'agent/config', 'agent/path-guard', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/list-files', 'agent/tools/find-files', 'agent/tools/write-file', 'agent/tools/edit-file', 'agent/tools/append-file', 'agent/tools/grep-search', 'agent/tools/execute-javascript', 'agent/tools/get-token-usage', 'agent/tools/set-user-timezone', 'agent/tools/query-logs', 'agent/tools/web-search', 'agent/pending', 'agent/safety', 'agent/stats']) {
       delete require.cache[require.resolve(path.join(LIB, rel))]
     }
     const isolatedConfig = require(path.join(LIB, 'agent', 'config'))
     const isolatedRegistry = require(path.join(LIB, 'agent', 'tools', 'registry'))
+    const isolatedPending = require(path.join(LIB, 'agent', 'pending'))
+    const isolatedShell = require(path.join(LIB, 'agent', 'tools', 'shell'))
+    const isolatedAppendFile = require(path.join(LIB, 'agent', 'tools', 'append-file'))
+    const isolatedGrepSearch = require(path.join(LIB, 'agent', 'tools', 'grep-search'))
+    const isolatedExecuteJavascript = require(path.join(LIB, 'agent', 'tools', 'execute-javascript'))
+    const isolatedGetTokenUsage = require(path.join(LIB, 'agent', 'tools', 'get-token-usage'))
+    const isolatedSetUserTimezone = require(path.join(LIB, 'agent', 'tools', 'set-user-timezone'))
+    const isolatedWebSearch = require(path.join(LIB, 'agent', 'tools', 'web-search'))
+    const isolatedWriteFile = require(path.join(LIB, 'agent', 'tools', 'write-file'))
+    const isolatedListFiles = require(path.join(LIB, 'agent', 'tools', 'list-files'))
+    const isolatedEditFile = require(path.join(LIB, 'agent', 'tools', 'edit-file'))
     const isolatedSafety = require(path.join(LIB, 'agent', 'safety'))
     check('agent config default dangerous policy confirm', isolatedConfig.getDangerousPolicy() === 'confirm')
+    check('agent config default qq web_search enabled', isolatedConfig.isToolEnabled('qq', 'web_search'))
     check('agent config default qq read_file disabled', !isolatedConfig.isToolEnabled('qq', 'read_file'))
+    check('agent config default qq list_files disabled', !isolatedConfig.isToolEnabled('qq', 'list_files'))
     check('agent config default qq find_files disabled', !isolatedConfig.isToolEnabled('qq', 'find_files'))
+    check('agent config default qq write_file disabled', !isolatedConfig.isToolEnabled('qq', 'write_file'))
+    check('agent config default qq edit_file disabled', !isolatedConfig.isToolEnabled('qq', 'edit_file'))
     check('agent config default dashboard read_file enabled', isolatedConfig.isToolEnabled('dashboard', 'read_file'))
+    check('agent config default dashboard list_files enabled', isolatedConfig.isToolEnabled('dashboard', 'list_files'))
     check('agent config default dashboard find_files enabled', isolatedConfig.isToolEnabled('dashboard', 'find_files'))
+    check('agent config default dashboard write_file enabled', isolatedConfig.isToolEnabled('dashboard', 'write_file'))
+    check('agent config default dashboard edit_file enabled', isolatedConfig.isToolEnabled('dashboard', 'edit_file'))
+    check('agent config default dashboard grep_search enabled', isolatedConfig.isToolEnabled('dashboard', 'grep_search'))
+    check('agent config default dashboard token usage enabled', isolatedConfig.isToolEnabled('dashboard', 'get_token_usage'))
+    check('agent config default dashboard query logs enabled', isolatedConfig.isToolEnabled('dashboard', 'query_logs'))
+    check('agent config default qq auto route disabled', !isolatedConfig.isAutoRouteEnabled('qq'))
+    check('agent config default dashboard auto route disabled', !isolatedConfig.isAutoRouteEnabled('dashboard'))
+    await isolatedConfig.patchAgentConfig({ enabledSkills: ['DemoSkill'] })
+    check('agent config stores enabled skills', isolatedConfig.getEnabledSkills().includes('DemoSkill'))
     check('agent config default browser placeholder disabled', !isolatedConfig.isToolEnabled('dashboard', 'browser_action'))
+    const writeRoot = path.join(agentTmp, 'workspace')
+    fs.mkdirSync(writeRoot, { recursive: true })
+    await isolatedConfig.patchAgentConfig({ readFileRoots: [writeRoot] })
+    const writeTarget = path.join(writeRoot, 'agent-write.txt')
+    const writeResult = await isolatedWriteFile.execute({ path: writeTarget, content: 'hello agent' })
+    check('agent write_file writes allowed text file', writeResult.includes(writeTarget) && read(writeTarget) === 'hello agent')
+    const listResult = JSON.parse(await isolatedListFiles.execute({ path: writeRoot }))
+    check('agent list_files lists allowed directory', listResult.entries.some(item => item.path === writeTarget && item.type === 'file'))
+    const appendResult = await isolatedAppendFile.execute({ path: writeTarget, content: '\nappend' })
+    check('agent append_file appends allowed text file', appendResult.includes(writeTarget) && read(writeTarget).includes('append'))
+    const grepResult = await isolatedGrepSearch.execute({ path: writeRoot, query: 'append', glob: '*.txt' })
+    check('agent grep_search finds allowed file content', grepResult.includes('append'))
+    check('agent execute_javascript computes data', await isolatedExecuteJavascript.execute({ code: '1 + 2' }) === '3')
+    try {
+      await isolatedExecuteJavascript.execute({ code: 'process.exit()' })
+      fail('agent execute_javascript blocks process', 'unsafe code executed')
+    } catch (error) {
+      check('agent execute_javascript blocks process', /禁止|被禁止/.test(String(error && error.message || error)))
+    }
+    check('agent get_token_usage returns stats', (await isolatedGetTokenUsage.execute({})).includes('累计调用'))
+    check('agent set_user_timezone stores preference', (await isolatedSetUserTimezone.execute({ userId: 'u1', timezone: 'Asia/Shanghai' })).includes('Asia/Shanghai'))
+    const webFallback = await isolatedWebSearch.execute({ query: '鸣潮 最新角色' })
+    check('agent web_search falls back to browser search when API search unavailable', typeof webFallback === 'string' && webFallback.includes('受控浏览器搜索') && webFallback.includes('已搜索'))
+    try {
+      await isolatedEditFile.execute({ path: writeTarget, oldString: 'missing', newString: 'nope' })
+      fail('agent edit_file rejects missing oldString', 'missing edit succeeded')
+    } catch (error) {
+      check('agent edit_file rejects missing oldString', /未找到 oldString/.test(String(error && error.message || error)))
+    }
+    try {
+      await isolatedWriteFile.execute({ path: path.join(agentTmp, 'outside.txt'), content: 'nope' })
+      fail('agent write_file rejects outside root', 'outside write succeeded')
+    } catch (error) {
+      check('agent write_file rejects outside root', /路径超出允许范围/.test(String(error && error.message || error)))
+    }
+    const outsideSymlinkTarget = path.join(agentTmp, 'symlink-outside.txt')
+    const insideSymlink = path.join(writeRoot, 'symlink-target.txt')
+    fs.writeFileSync(outsideSymlinkTarget, 'outside')
+    try { fs.symlinkSync(outsideSymlinkTarget, insideSymlink) } catch {}
+    if (fs.existsSync(insideSymlink)) {
+      try {
+        await isolatedWriteFile.execute({ path: insideSymlink, content: 'nope', overwrite: true })
+        fail('agent write_file rejects symlink target', 'symlink write succeeded')
+      } catch (error) {
+        check('agent write_file rejects symlink target', /符号链接|超出允许范围/.test(String(error && error.message || error)))
+      }
+    }
+    try {
+      await isolatedShell.execute({ command: 'pwd', cwd: agentTmp })
+      fail('agent shell rejects outside cwd', 'outside shell succeeded')
+    } catch (error) {
+      check('agent shell rejects outside cwd', /工作目录超出允许范围/.test(String(error && error.message || error)))
+    }
+    const isolatedPathGuard = require(path.join(LIB, 'agent', 'path-guard'))
+    check('agent path guard uses configured realpath roots', (await isolatedPathGuard.getAgentPathAllowedRoots()).some(root => root === fs.realpathSync(writeRoot)))
+    isolatedRegistry.toolRegistry.__cascade_long = { execute: async () => 'x'.repeat(4100) }
+    check('agent registry preserves long tool output for context externalization', (await isolatedRegistry.executeTool('__cascade_long', {})).text.length === 4100)
+    delete isolatedRegistry.toolRegistry.__cascade_long
+    isolatedRegistry.toolRegistry.__cascade_once = { definition: { name: '__cascade_once' }, execute: async () => 'done' }
+    await isolatedConfig.setToolEnabled('dashboard', '__cascade_once', true)
+    const oncePendingId = isolatedPending.setPendingTool('dashboard', 'dashboard', { toolName: '__cascade_once', args: {} })
+    check('agent pending rejects mismatched confirm id', (await isolatedPending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', 'wrong')).status === 404)
+    check('agent pending single-consumes confirmed tool', (await isolatedPending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', oncePendingId)).ok)
+    check('agent pending rejects repeated confirm', (await isolatedPending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', oncePendingId)).status === 404)
+    delete isolatedRegistry.toolRegistry.__cascade_once
     await isolatedConfig.setToolEnabled('qq', 'web_search', true)
     check('agent config enables qq web_search', isolatedRegistry.getToolDefinitions('qq').some(item => item.function.name === 'web_search'))
     await isolatedConfig.patchAgentConfig({ dangerousPolicy: 'block' })
     check('agent config dangerous policy blocks shell', isolatedSafety.check('execute_shell').allowed === false)
+    await isolatedConfig.patchAgentConfig({ dangerousPolicy: 'confirm' })
+    check('agent config confirm policy marks dangerous tools as confirm', isolatedSafety.check('write_file').action === 'confirm' && isolatedSafety.check('edit_file').action === 'confirm' && isolatedSafety.check('append_file').action === 'confirm')
     await isolatedConfig.setToolEnabled('dashboard', 'browser_action', true)
     check('agent config can expose browser placeholder when explicitly enabled', isolatedRegistry.getToolDefinitions('dashboard').some(item => item.function.name === 'browser_action'))
   } finally {
     if (originalAgentDataDir) process.env.DONGXUELIAN_AI_DATA_DIR = originalAgentDataDir
     else delete process.env.DONGXUELIAN_AI_DATA_DIR
-    for (const rel of ['constants', 'agent/config', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/find-files', 'agent/safety']) {
+    for (const rel of ['constants', 'runtime-config', 'agent/config', 'agent/path-guard', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/list-files', 'agent/tools/find-files', 'agent/tools/write-file', 'agent/tools/edit-file', 'agent/tools/append-file', 'agent/tools/grep-search', 'agent/tools/execute-javascript', 'agent/tools/get-token-usage', 'agent/tools/set-user-timezone', 'agent/tools/query-logs', 'agent/tools/web-search', 'agent/pending', 'agent/safety', 'agent/stats']) {
       delete require.cache[require.resolve(path.join(LIB, rel))]
     }
     try { fs.rmSync(agentTmp, { recursive: true, force: true }) } catch {}
@@ -1237,18 +1431,38 @@ async function main() {
   check('dashboard deploy does not copy removed patch.js', !dashboardStandalone.includes('/patch.js') && !dashboardStandalone.includes('patch.js ${s}'))
   check('dashboard stop avoids broad koishi pkill', !dashboardStandalone.includes("pkill -9 -f 'koishi'"))
   check('dashboard explicit local auth bypass only', dashboardStandalone.includes('function isLocalAuthBypass') && dashboardStandalone.includes('GLOBAL_LOCAL_MODE'))
-  check('dashboard exposes agent config API', dashboardStandalone.includes("/dashboard/api/agent/config") && dashboardStandalone.includes("agent', 'config"))
-  check('dashboard exposes agent chat API', dashboardStandalone.includes("/dashboard/api/agent/chat") && dashboardStandalone.includes("agent', 'engine"))
+  check('dashboard exposes agent config API', dashboardStandalone.includes("/dashboard/api/agent/config") && dashboardStandalone.includes("agent', 'config") && dashboardStandalone.includes("if (pathname === '/dashboard/api/agent/config' && req.method === 'GET')") && dashboardStandalone.includes('if (!requireAdmin(req, res)) return'))
+  check('dashboard exposes compatible tools API', dashboardStandalone.includes("/dashboard/api/tools") && dashboardStandalone.includes("/enabled") && dashboardStandalone.includes("/pending"))
+  check('dashboard exposes agent chat API', dashboardStandalone.includes("/dashboard/api/agent/chat") && dashboardStandalone.includes("agent', 'engine") && dashboardStandalone.includes('data.history'))
+  check('dashboard exposes agent sessions API', dashboardStandalone.includes("/dashboard/api/agent/sessions") && dashboardStandalone.includes("agent', 'sessions") && dashboardStandalone.includes('listAgentSessions'))
+  check('dashboard exposes agent confirm API', dashboardStandalone.includes("/dashboard/api/agent/confirm") && dashboardStandalone.includes('findPendingToolById'))
   check('dashboard agent API returns skill index', dashboardStandalone.includes("agent', 'skills") && dashboardStandalone.includes('listAgentSkills'))
   const dashboardAppSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'frontend', 'src', 'App.vue'))
   const dashboardAgentPanelSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'frontend', 'src', 'components', 'AgentPanel.vue'))
   check('dashboard sidebar includes agent panel tab', dashboardAppSrc.includes("id: 'agent'") && dashboardAppSrc.includes('AgentPanel'))
   check('dashboard agent panel manages tools and skills', dashboardAgentPanelSrc.includes('fetchAgentConfig') && dashboardAgentPanelSrc.includes('Skill 索引'))
+  check('dashboard agent panel exposes skill selection', dashboardAgentPanelSrc.includes('config.enabledSkills') && dashboardAgentPanelSrc.includes(':value="skill.name"'))
+  check('dashboard agent panel exposes read roots', dashboardAgentPanelSrc.includes('文件读取根目录') && dashboardAgentPanelSrc.includes('config.readFileRoots'))
+  check('dashboard agent panel stores local chat history', dashboardAgentPanelSrc.includes('dashboard_agent_history') && dashboardAgentPanelSrc.includes('history.value'))
+  check('dashboard agent panel exposes pending confirmation', dashboardAgentPanelSrc.includes('confirmAgentTool') && dashboardAgentPanelSrc.includes('pendingTools') && dashboardAgentPanelSrc.includes('argsSummary'))
+  check('dashboard agent panel prompts admin for chat and confirm', dashboardAgentPanelSrc.includes('isAdminRequired') && dashboardAgentPanelSrc.includes('使用 Dashboard Agent 需要管理员密码') && dashboardAgentPanelSrc.includes('确认 Agent 工具需要管理员密码'))
+  check('dashboard agent panel normalizes click event pending id', dashboardAgentPanelSrc.includes('normalizePendingId') && dashboardAgentPanelSrc.includes("typeof value === 'string'"))
+  check('dashboard agent panel displays final agent reply shape', dashboardAgentPanelSrc.includes('getAgentReply') && dashboardAgentPanelSrc.includes('data?.reply || data?.result || data?.message'))
+  check('dashboard agent panel exposes session and stats lists', dashboardAgentPanelSrc.includes('fetchAgentSessions') && dashboardAgentPanelSrc.includes('最近工具调用'))
+  const skillHubCli = read(path.join(ROOT, 'scripts', 'skill-hub.js'))
+  check('skill hub CLI exposes list/search/enable/disable', skillHubCli.includes('list|search') && skillHubCli.includes('enable') && skillHubCli.includes('disable'))
+  const handlerSrc = read(path.join(LIB, 'handler.js'))
+  check('handler exposes agent skill command management', handlerSrc.includes('工具Skill') && handlerSrc.includes('skill-hub'))
+  const browserActionSrc = read(path.join(LIB, 'agent', 'tools', 'browser-action.js'))
+  check('browser action exposes plan action aliases', browserActionSrc.includes("'start'") && browserActionSrc.includes("'stop'") && browserActionSrc.includes("'navigate'") && browserActionSrc.includes("'wait_for'"))
+  check('browser action exposes snapshot action', browserActionSrc.includes("'snapshot'") && browserActionSrc.includes('getSnapshot'))
+  check('browser action exposes guarded interaction actions', browserActionSrc.includes("'click'") && browserActionSrc.includes('requireSelector') && browserActionSrc.includes("'screenshot'"))
+  check('dashboard agent panel exposes auto route switch', dashboardAgentPanelSrc.includes('QQ 自动路由') && dashboardAgentPanelSrc.includes('config.autoRoute.qq.enabled'))
   check('dashboard rejects missing access password', dashboardStandalone.includes('access password is not configured'))
   check('restart-bot uses local koishi binary', restartBot.includes('node "$APP_DIR/node_modules/koishi/bin.js" start'))
   check('restart-bot does not use stale koishi.config.js', !restartBot.includes('koishi.config.js'))
   check('restart-bot checks adapter connect log', restartBot.includes('adapter connect to server'))
-  check('restart-bot checks 5140 http health', restartBot.includes('curl -fsS "http://127.0.0.1:$KOISHI_PORT"'))
+  check('restart-bot checks 5140 port health', restartBot.includes('ss -tlnp | grep -q ":$KOISHI_PORT"'))
   const setupPath = path.join(ROOT, 'setup.sh')
   const setupBuffer = fs.readFileSync(setupPath)
   check('setup.sh is text without NUL bytes', !setupBuffer.includes(0))

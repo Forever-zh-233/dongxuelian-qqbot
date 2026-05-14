@@ -792,8 +792,9 @@ async function handleCommand(session, ctx, state) {
       session.author?.nick || session.author?.name || session.username || '群友'
     )
     try {
+      const searchRunOptions = require('./agent/router').buildExplicitSearchRunOptions(query)
       const result = await engine.run({
-        userMessage: query, userName, userId: currentUserId, channelKey, channel: 'qq',
+        userMessage: query, userName, userId: currentUserId, channelKey, channel: 'qq', ...searchRunOptions,
         onProgress: (msg) => {
           if (msg.type === 'round' && msg.round === 0) {
             // 首轮执行中，不额外输出
@@ -808,14 +809,20 @@ async function handleCommand(session, ctx, state) {
   }
 
   // === Agent 待确认处理 ===
-  if (plain === '确认工具' || plain === 'y' || plain === 'Y') {
+  const confirmToolMatch = plain.match(/^(?:确认工具|y|Y)(?:\s+(pnd[0-9a-z]+))?$/i)
+  if (confirmToolMatch) {
+    const pendingId = confirmToolMatch[1] || ''
     const pending = require('./agent/pending')
-    const p = pending.getPendingTool(channelKey, currentUserId)
+    const findPendingById = pending.findPendingToolById || pending.getPendingToolById || (id => (pending.listPendingTools && pending.listPendingTools().find(item => item.id === id)) || null)
+    const p = pendingId ? findPendingById(pendingId) : pending.getPendingTool(channelKey, currentUserId)
     if (p) {
-      const result = await pending.confirmPendingTool(channelKey, currentUserId, 'qq')
-      if (!result.ok) return handled(`执行失败：${result.message || result.error || '未知错误'}`)
-      return handled(`已执行 ${result.toolName}：\n${String(result.result || '').slice(0, 500)}`)
+      if (p.channelKey !== channelKey || p.userId !== currentUserId) return handled('这个确认 ID 不属于当前会话。')
+      const engine = require('./agent/engine')
+      const result = await engine.resumePending({ channelKey, userId: currentUserId, channel: 'qq', expectedId: pendingId })
+      if (!result.ok && result.message) return handled(`执行失败：${result.message || result.error || '未知错误'}`)
+      return handled(result.reply || '(Agent 未获取到有效回复)')
     }
+    if (pendingId) return handled('没有匹配的待确认工具。')
   }
 
   return notHandled()

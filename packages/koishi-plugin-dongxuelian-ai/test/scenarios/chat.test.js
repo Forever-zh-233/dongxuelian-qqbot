@@ -30,11 +30,12 @@ async function withFetch(mocked, fn) {
 }
 
 async function runChatCase(t, label, fetchQueue, assertions, options = {}) {
-  await withScenario({}, async ({ harness, makeSession, run }) => {
+  await withScenario({}, async ({ harness, makeSession, run, data }) => {
     const mocked = mockFetch(fetchQueue)
     await withFetch(mocked, async () => {
       const session = makeSession(options.session || {})
-      if (typeof options.setup === 'function') await options.setup(session, { harness, mocked })
+      if (options.autoRoute) data.writeJson('ai-tool-config.json', { channels: { qq: { enabled: true, tools: { get_current_time: true, calculate: true } }, dashboard: { enabled: true, tools: {} } }, autoRoute: { qq: { enabled: true }, dashboard: { enabled: false } }, dangerousPolicy: 'confirm', enabledSkills: [], readFileRoots: [] })
+      if (typeof options.setup === 'function') await options.setup(session, { harness, mocked, data })
       session.content = atBot(session, options.input || '\u4f60\u597d')
       const beforeCalls = mocked.calls.length
       let result = await run(session, { flushTicks: 120 })
@@ -66,6 +67,62 @@ async function run(t) {
   }, {
     waitFor: message => String(message).includes('final-visible'),
   })
+
+  await runChatCase(t, 'agent auto route stays off by default', [
+    { json: { choices: [{ message: { content: 'normal-time-answer' } }] } },
+  ], async (result, mocked) => {
+    checkSentIncludes(t, 'scenario agent auto route default off uses normal chat', result, 'normal-time-answer')
+    t.check('scenario agent auto route default off has no tool schema', mocked.calls.length === 1 && !mocked.calls[0].requestBody.tools, JSON.stringify(mocked.calls.map(call => call.requestBody)))
+  }, {
+    input: '现在几点了',
+    waitFor: message => String(message).includes('normal-time-answer'),
+  })
+
+  await runChatCase(t, 'agent auto route ignores casual greeting', [
+    { json: { choices: [{ message: { content: 'greeting-ok' } }] } },
+  ], async (result, mocked) => {
+    checkSentIncludes(t, 'scenario agent auto route ignores casual greeting', result, 'greeting-ok')
+    t.check('scenario casual greeting uses normal chat only', mocked.calls.length === 1, `calls=${mocked.calls.length}`)
+  }, {
+    input: '你好',
+    waitFor: message => String(message).includes('greeting-ok'),
+  })
+
+  await runChatCase(t, 'agent auto route handles time question', [
+    { json: { choices: [{ message: { content: '', tool_calls: [{ id: 'tc-time', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] } }] } },
+    { json: { choices: [{ message: { content: 'agent-time-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario agent auto route sends tool answer', result, 'agent-time-ok')
+    t.check('scenario agent auto route used tool request', calls.length === 2 && Array.isArray(calls[0].requestBody.tools), JSON.stringify(calls.map(call => call.requestBody)))
+    t.check('scenario agent auto route exposed time tool', calls[0].requestBody.tools.some(item => item.function && item.function.name === 'get_current_time'), JSON.stringify(calls[0].requestBody.tools))
+  }, {
+    input: '现在几点了',
+    autoRoute: true,
+    waitFor: message => String(message).includes('agent-time-ok'),
+  })
+
+  await runChatCase(t, 'explicit web_search request routes to Agent even when auto route disabled', [
+    { json: { choices: [{ message: { content: 'agent-search-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario explicit web_search request sends Agent reply', result, 'agent-search-ok')
+    t.check('scenario explicit web_search request used tool result before model reply', calls.length === 1 && JSON.stringify(calls[0].requestBody.messages || []).includes('已搜索：鸣潮 最新角色'), JSON.stringify(calls.map(call => call.requestBody)))
+    t.check('scenario explicit web_search request exposes web_search', calls[0].requestBody.tools.some(item => item.function && item.function.name === 'web_search'), JSON.stringify(calls[0].requestBody.tools))
+  }, {
+    input: '调用web_search查鸣潮最新角色是谁',
+    setup(session) {
+      const webSearch = require(path.join(AI_ROOT, 'lib', 'agent', 'tools', 'web-search.js'))
+      webSearch.__scenarioOriginalExecute = webSearch.execute
+      webSearch.execute = async () => '已搜索：鸣潮 最新角色\n搜索结果：绯雪与达妮娅'
+    },
+    waitFor: message => String(message).includes('agent-search-ok'),
+  })
+  try {
+    const webSearch = require(path.join(AI_ROOT, 'lib', 'agent', 'tools', 'web-search.js'))
+    if (webSearch.__scenarioOriginalExecute) {
+      webSearch.execute = webSearch.__scenarioOriginalExecute
+      delete webSearch.__scenarioOriginalExecute
+    }
+  } catch {}
 
   await runChatCase(t, 'reasoning-only fallback', [
     { json: { choices: [{ message: { content: '', reasoning_content: 'reasoning-secret' } }] } },

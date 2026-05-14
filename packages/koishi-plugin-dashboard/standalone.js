@@ -3140,6 +3140,7 @@ const server = http.createServer((req, res) => {
         name: tool.definition.name,
         description: tool.definition.description || '',
         dangerous: !!tool.dangerous,
+        external: tool.definition.name === 'web_search',
         defaultChannels: tool.defaultChannels || ['dashboard', 'qq'],
         channels: {
           qq: !!agentConfig.channels?.qq?.tools?.[tool.definition.name],
@@ -3183,10 +3184,12 @@ const server = http.createServer((req, res) => {
       try {
         const pending = require(path.join(AI_LIB, 'agent', 'pending'))
         const pendingId = decodeURIComponent(toolApproveMatch[1])
-        const p = pending.findPendingToolById(pendingId)
+        const findPendingById = pending.findPendingToolById || pending.getPendingToolById || (id => (pending.listPendingTools && pending.listPendingTools().find(item => item.id === id)) || null)
+        const p = findPendingById(pendingId)
         if (!p) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
-        const result = await pending.confirmPendingTool(p.channelKey, p.userId, p.channel || 'dashboard', pendingId)
-        return json(res, { ok: result.ok, toolName: result.toolName, result: result.result, message: result.message || result.error || '' }, result.ok ? 200 : (result.status || 500))
+        const engine = require(path.join(AI_LIB, 'agent', 'engine'))
+        const result = await engine.resumePending({ channelKey: p.channelKey, userId: p.userId, channel: p.channel || 'dashboard', expectedId: pendingId })
+        return json(res, { ok: !result.message || !!result.reply, toolName: p.toolName, reply: result.reply || '', result: result.reply || result.message || '', message: result.message || '' }, result.status || 200)
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })()
     return
@@ -3201,17 +3204,19 @@ const server = http.createServer((req, res) => {
       const safety = require(path.join(AI_LIB, 'agent', 'safety'))
       const stats = require(path.join(AI_LIB, 'agent', 'stats')).getStats()
       const skills = require(path.join(AI_LIB, 'agent', 'skills')).listAgentSkills()
+      const effectiveReadRoots = Array.isArray(agentConfig.readFileRoots) && agentConfig.readFileRoots.length ? agentConfig.readFileRoots : [process.cwd()]
       const qqEnabledTools = new Set(registry.getToolDefinitions('qq').map(item => item.function.name))
       const dashboardEnabledTools = new Set(registry.getToolDefinitions('dashboard').map(item => item.function.name))
       const tools = Object.values(registry.toolRegistry).map(tool => ({
         name: tool.definition.name,
         description: tool.definition.description || '',
         dangerous: !!tool.dangerous,
+        external: tool.definition.name === 'web_search',
         defaultChannels: tool.defaultChannels || ['dashboard', 'qq'],
         qqEnabled: qqEnabledTools.has(tool.definition.name),
         dashboardEnabled: dashboardEnabledTools.has(tool.definition.name),
       }))
-      return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills })
+      return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills, effectiveReadRoots })
     } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
   }
 
@@ -3238,6 +3243,17 @@ const server = http.createServer((req, res) => {
     } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
   }
 
+  const sessionDetailMatch = pathname.match(/^\/dashboard\/api\/agent\/sessions\/(.+)$/)
+  if (sessionDetailMatch && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const id = decodeURIComponent(sessionDetailMatch[1])
+      const session = require(path.join(AI_LIB, 'agent', 'sessions')).getAgentSession(id)
+      if (!session) return json(res, { ok: false, message: '会话不存在' }, 404)
+      return json(res, { ok: true, session })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
   if (pathname === '/dashboard/api/agent/chat' && req.method === 'POST') {
     if (!requireAdmin(req, res)) return
     collectBody(req, res, async (body) => {
@@ -3247,6 +3263,7 @@ const server = http.createServer((req, res) => {
         if (!message) return json(res, { ok: false, message: '消息不能为空' }, 400)
         const engine = require(path.join(AI_LIB, 'agent', 'engine'))
         const history = require(path.join(AI_LIB, 'agent', 'messages')).sanitizeAgentHistory(data.history)
+        const searchRunOptions = require(path.join(AI_LIB, 'agent', 'router')).buildExplicitSearchRunOptions(message)
         const result = await engine.run({
           userMessage: message,
           userName: String(data.userName || 'Dashboard'),
@@ -3254,6 +3271,7 @@ const server = http.createServer((req, res) => {
           channelKey: 'dashboard',
           channel: 'dashboard',
           history,
+          ...searchRunOptions,
         })
         return json(res, { ok: true, ...result })
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
@@ -3268,10 +3286,28 @@ const server = http.createServer((req, res) => {
         const pending = require(path.join(AI_LIB, 'agent', 'pending'))
         const data = JSON.parse(body || '{}')
         const expectedId = String(data.pendingId || '')
-        const p = expectedId ? pending.findPendingToolById(expectedId) : pending.getPendingTool('dashboard', 'dashboard')
+        const findPendingById = pending.findPendingToolById || pending.getPendingToolById || (id => (pending.listPendingTools && pending.listPendingTools().find(item => item.id === id)) || null)
+        const p = expectedId ? findPendingById(expectedId) : pending.getPendingTool('dashboard', 'dashboard')
         if (!p) return json(res, { ok: false, message: '没有待确认工具' }, 404)
-        const result = await pending.confirmPendingTool(p.channelKey, p.userId, p.channel || 'dashboard', expectedId)
-        return json(res, { ok: result.ok, toolName: result.toolName, result: result.result, message: result.message || result.error || '' }, result.ok ? 200 : (result.status || 500))
+        const engine = require(path.join(AI_LIB, 'agent', 'engine'))
+        const result = await engine.resumePending({ channelKey: p.channelKey, userId: p.userId, channel: p.channel || 'dashboard', expectedId })
+        return json(res, { ok: !result.message || !!result.reply, toolName: p.toolName, reply: result.reply || '', result: result.reply || result.message || '', message: result.message || '' }, result.status || 200)
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/reject' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const pending = require(path.join(AI_LIB, 'agent', 'pending'))
+        const data = JSON.parse(body || '{}')
+        const pendingId = String(data.pendingId || '')
+        if (!pendingId) return json(res, { ok: false, message: 'pendingId 不能为空' }, 400)
+        const ok = pending.clearPendingToolById(pendingId)
+        if (!ok) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
+        return json(res, { ok: true, message: '已拒绝工具请求' })
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })
     return

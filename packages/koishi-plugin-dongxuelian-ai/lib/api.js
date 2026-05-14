@@ -55,6 +55,26 @@ function rebuildFallbackExtraBody(extraBody = {}, config = {}) {
   return next
 }
 
+function normalizeMessagesForProvider(messages = [], config = {}) {
+  if (!isDashScopeConfig(config)) return messages
+  const result = []
+  let firstSystem = null
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!message || !message.content) continue
+    if (message.role === 'system') {
+      if (!firstSystem) {
+        firstSystem = { ...message, content: String(message.content) }
+        result.push(firstSystem)
+      } else {
+        firstSystem.content += '\n\n' + String(message.content)
+      }
+    } else {
+      result.push(message)
+    }
+  }
+  return result
+}
+
 async function requestChatCompletions(messages, config, extraBody = {}, tools = null) {
   const fallbackSet = extraBody._fallbackSet || 'chat'
   if (!config._originalConfig && !config._fallbackTried) {
@@ -68,6 +88,7 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
     if (extraBody[key] !== undefined) filteredExtraBody[key] = extraBody[key]
   }
   const maxTokens = filteredExtraBody.max_tokens || 1500
+  const providerMessages = normalizeMessagesForProvider(messages, config)
   try {
     let response
     try {
@@ -77,7 +98,7 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
         body: JSON.stringify({
           model: config.model, temperature: 0.9, max_tokens: maxTokens,
           ...(isDashScopeConfig(config) ? { enable_thinking: false } : {}),
-          ...filteredExtraBody, messages,
+          ...filteredExtraBody, messages: providerMessages,
           ...(tools && Array.isArray(tools) && tools.length ? { tools, tool_choice: 'auto' } : {}),
         }),
       })
@@ -387,7 +408,7 @@ function isVisionModel(provider, modelId) {
 }
 
 module.exports = {
-  requestChatCompletions, buildResponsesInput, extractResponsesText,
+  requestChatCompletions, normalizeMessagesForProvider, buildResponsesInput, extractResponsesText,
   requestOpenAIResponsesWithSearch,
   buildFallbackConfig, getFallbackSteps,
   callGetImage, callGetForwardMsg, sendForwardMsg, getGroupMemberInfo, getGroupInfo,

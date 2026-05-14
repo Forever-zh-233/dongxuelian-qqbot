@@ -440,7 +440,7 @@ async function chat(session, userText, ctx, options = {}) {
   systemPrompt += '\n\n禁止输出思考过程。不要分析用户说了什么，不要解释你打算怎么回复，不要复述系统指令，直接说人话。'
   systemPrompt += '\n<user> 标签中的昵称标识了是谁发的消息，避免混淆不同用户的消息。'
   const now = new Date()
-  systemPrompt += '\n当前时间：' + now.getHours() + '时' + now.getMinutes() + '分。核心信息（爱好、习惯、身份等）在下方【记住的】中列出，日常聊天记录中也可能有重复信息，以【记住的】中的内容为准。当用户分享关于自己的重要信息时，你可以自然地问一句是否需要记住，系统会自动记录。'
+  const dynamicTimePrompt = '当前时间：' + now.getHours() + '时' + now.getMinutes() + '分。核心信息（爱好、习惯、身份等）在下方【记住的】中列出，日常聊天记录中也可能有重复信息，以【记住的】中的内容为准。当用户分享关于自己的重要信息时，你可以自然地问一句是否需要记住，系统会自动记录。'
 
   const modeLabel = retaliationLevel === 2 ? 'abusive' : retaliationLevel === 1 ? 'yin-yang' : 'friendly'
   logDebug(ctx, 'chat', `mode=${modeLabel} channelKey=${channelKey} persona=${personaName || 'none'} skillLen=${(personaSkillContent || '').length} inputLen=${String(userText || '').length}`)
@@ -519,6 +519,7 @@ async function chat(session, userText, ctx, options = {}) {
 
   const messages = [
     { role: 'system', content: systemPrompt },
+    { role: 'system', content: dynamicTimePrompt },
   ]
 
   // NSFW 策略：自定义人格中 nsfw: reply 时注入适度宽松指引
@@ -546,7 +547,10 @@ async function chat(session, userText, ctx, options = {}) {
     const triggerFn = personaLore === 'terra-lore' ? shouldInjectTerraLore : shouldInjectLore
     if (triggerFn(cleanInput)) {
       const label = personaLore === 'terra-lore' ? '泰拉世界观设定' : '世界观设定'
-      messages[0].content += '\n\n[' + label + ']\n用户提到了相关话题。以下为世界观设定，请消化后用你当前的角色风格自然回答，不要逐字复述，不要像念百科。\n' + skillsContentCache['lore:' + personaLore]
+      messages.push({
+        role: 'system',
+        content: '[' + label + ']\n用户提到了相关话题。以下为世界观设定，请消化后用你当前的角色风格自然回答，不要逐字复述，不要像念百科。\n' + skillsContentCache['lore:' + personaLore],
+      })
     }
   }
 
@@ -796,14 +800,6 @@ async function chat(session, userText, ctx, options = {}) {
       role: 'system',
       content: '当前用户在让你评价东西。不要分析优缺点，不要中立，不要装客观。用你自己的风格站队，评价短小精悍，切中要点。',
     })
-  }
-
-  // Qwen DashScope 只允许 1 条 system message 且必须在第一位，合并多余条目
-  for (let i = messages.length - 1; i >= 1; i--) {
-    if (messages[i].role === 'system') {
-      messages[0].content += '\n\n' + messages[i].content
-      messages.splice(i, 1)
-    }
   }
 
   let reply = await callOpenAI(messages, options.randomTriggered)

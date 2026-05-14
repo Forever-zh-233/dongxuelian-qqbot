@@ -6,7 +6,7 @@
  */
 const pending = new Map()
 
-/** @returns {{ id, toolName, args, userId, channelKey, channel, expireAt } | null } */
+/** @returns {{ id, toolName, args, userId, channelKey, channel, expireAt, resume } | null } */
 function getPendingTool(channelKey, userId) {
   const key = channelKey + ':' + userId
   const p = pending.get(key)
@@ -15,15 +15,28 @@ function getPendingTool(channelKey, userId) {
   return p
 }
 
-function setPendingTool(channelKey, userId, { toolName, args, channel }) {
+function setPendingTool(channelKey, userId, { toolName, args, channel, resume }) {
   const key = channelKey + ':' + userId
   const id = 'pnd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-  pending.set(key, { id, toolName, args, userId, channelKey, channel: channel || 'unknown', expireAt: Date.now() + 60000 })
+  pending.set(key, { id, toolName, args, userId, channelKey, channel: channel || 'unknown', resume: resume || null, expireAt: Date.now() + 60000 })
   return id
 }
 
 function clearPendingTool(channelKey, userId) {
   pending.delete(channelKey + ':' + userId)
+}
+
+function clearPendingToolById(id) {
+  const target = String(id || '')
+  if (!target) return false
+  trimPendingTools()
+  for (const [key, value] of pending) {
+    if (value.id === target) {
+      pending.delete(key)
+      return true
+    }
+  }
+  return false
 }
 
 /** 清理过期 */
@@ -43,6 +56,10 @@ function findPendingToolById(id) {
     if (p.id === target) return p
   }
   return null
+}
+
+function getPendingToolById(id) {
+  return findPendingToolById(id)
 }
 
 function summarizePendingArgs(toolName, args = {}) {
@@ -69,7 +86,7 @@ function listPendingTools() {
   }))
 }
 
-async function confirmPendingTool(channelKey, userId, channel = 'unknown', expectedId = '') {
+async function executePendingTool(channelKey, userId, channel = 'unknown', expectedId = '') {
   const p = getPendingTool(channelKey, userId)
   if (!p) return { ok: false, status: 404, message: '没有待确认工具' }
   if (expectedId && p.id !== expectedId) return { ok: false, status: 404, message: '没有匹配的待确认工具' }
@@ -83,10 +100,16 @@ async function confirmPendingTool(channelKey, userId, channel = 'unknown', expec
 
   clearPendingTool(channelKey, userId)
   const registry = require('./tools/registry')
-  const { recordCall } = require('./stats')
-  const result = await registry.executeTool(p.toolName, p.args || {})
-  if (result.ok) recordCall(p.toolName, channel)
-  return { ok: result.ok, toolName: p.toolName, result: result.text, error: result.error || '', message: result.ok ? '' : result.text }
+  const result = await registry.executeTool(p.toolName, p.args || {}, { channel, channelKey, userId })
+  return { ok: result.ok, pending: p, toolName: p.toolName, result: result.text, error: result.error || '', message: result.ok ? '' : result.text }
 }
 
-module.exports = { getPendingTool, findPendingToolById, setPendingTool, clearPendingTool, trimPendingTools, listPendingTools, confirmPendingTool }
+async function confirmPendingTool(channelKey, userId, channel = 'unknown', expectedId = '') {
+  const executed = await executePendingTool(channelKey, userId, channel, expectedId)
+  if (!executed.ok && !executed.pending) return executed
+  const { recordCall } = require('./stats')
+  if (executed.ok) recordCall(executed.toolName, channel)
+  return { ok: executed.ok, toolName: executed.toolName, result: executed.result, error: executed.error || '', message: executed.ok ? '' : executed.result }
+}
+
+module.exports = { getPendingTool, findPendingToolById, getPendingToolById, setPendingTool, clearPendingTool, clearPendingToolById, trimPendingTools, listPendingTools, executePendingTool, confirmPendingTool }

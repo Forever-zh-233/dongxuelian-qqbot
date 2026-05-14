@@ -29,6 +29,10 @@ function parseFrontmatter(text) {
   return meta
 }
 
+function stripFrontmatter(text = '') {
+  return String(text || '').replace(/^---\n[\s\S]*?\n---\s*/, '').trim()
+}
+
 function listAgentSkills() {
   const skills = []
   for (const group of SKILL_DIRS) {
@@ -45,6 +49,7 @@ function listAgentSkills() {
         file,
         name: meta.name || entry.name.replace(/^SKILL\.|\.md$/gi, ''),
         description: meta.description || '',
+        excerpt: stripFrontmatter(content).slice(0, 2400),
         enabled: meta.enabled !== 'false',
       })
     }
@@ -57,7 +62,17 @@ function buildAgentSkillSummary(enabledNames = []) {
   if (enabled.size === 0) return ''
   const selected = listAgentSkills().filter(skill => enabled.has(skill.name)).slice(0, 12)
   if (selected.length === 0) return ''
-  return '已启用 Agent Skill：\n' + selected.map(skill => `- ${skill.name}（${skill.kind}）：${skill.description || '无描述'}`).join('\n')
+  let budget = 12000
+  const lines = ['已启用 Agent Skill：']
+  for (const skill of selected) {
+    lines.push(`- ${skill.name}（${skill.kind}）：${skill.description || '无描述'}`)
+    if (skill.excerpt && budget > 0) {
+      const excerpt = skill.excerpt.slice(0, Math.min(2400, budget))
+      lines.push(`  摘录：${excerpt}`)
+      budget -= excerpt.length
+    }
+  }
+  return lines.join('\n')
 }
 
-module.exports = { listAgentSkills, parseFrontmatter, buildAgentSkillSummary }
+module.exports = { listAgentSkills, parseFrontmatter, buildAgentSkillSummary, stripFrontmatter }

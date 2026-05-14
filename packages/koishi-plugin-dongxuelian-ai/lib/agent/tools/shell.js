@@ -1,16 +1,11 @@
 /**
  * MODULE: Shell 命令执行工具。
- * 安全：denylist + timeout + 路径限定。默认危险（需 confirm 或 block）。
+ * 安全：QwenPaw 完整 28 规则 shell-guard + timeout + 路径限定。默认危险（需 confirm 或 block）。
  */
 const { execFile } = require('child_process')
 const os = require('os')
 const { assertExistingAgentPathInsideRoots } = require('../path-guard')
-
-const DENYLIST = [
-  /rm\s+(-rf?\s*\/|--no-preserve-root)/i,
-  /mkfs/i, /dd\s+if=/i, />\s*\/dev\/(sd|nvme)/i,
-  /chmod\s+777\s+\//i, /:\(\)\s*\{\s*:\s*\|\s*:&\s*\};:/i,
-]
+const { checkShellCommand } = require('./shell-guard')
 
 module.exports = {
   definition: {
@@ -29,7 +24,15 @@ module.exports = {
     const command = String(params.command || '').trim()
     if (!command) throw new Error('命令为空')
     if (command.length > 8000) throw new Error('命令过长')
-    if (DENYLIST.some(re => re.test(command))) throw new Error(`危险命令已被拦截`)
+
+    // QwenPaw 完整安全规则检查
+    const guardResult = checkShellCommand(command)
+    if (guardResult.blocked) {
+      throw new Error(`命令被安全策略拒绝：\n${guardResult.summary}`)
+    }
+    if (guardResult.violations.length > 0) {
+      throw new Error(`命令触发安全警告：\n${guardResult.summary}`)
+    }
 
     const { abs: cwd } = await assertExistingAgentPathInsideRoots(params.cwd || process.cwd(), '工作目录')
     const isWin = os.platform() === 'win32'

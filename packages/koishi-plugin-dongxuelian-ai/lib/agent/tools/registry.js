@@ -14,9 +14,18 @@ const writeFileTool = require('./write-file')
 const editFileTool = require('./edit-file')
 const shellTool = require('./shell')
 const browserActionTool = require('./browser-action')
+const appendFileTool = require('./append-file')
+const grepSearchTool = require('./grep-search')
+const executeJavascriptTool = require('./execute-javascript')
+const sendFileToUserTool = require('./send-file-to-user')
+const getTokenUsageTool = require('./get-token-usage')
+const setUserTimezoneTool = require('./set-user-timezone')
+const queryLogsTool = require('./query-logs')
 const { getAgentConfig } = require('../config')
 
-const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool]
+const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool]
+
+const TOOL_TIMEOUT_MS = 90000
 
 const toolRegistry = {}
 for (const tool of tools) {
@@ -38,17 +47,21 @@ function getToolDefinitions(channel = 'qq') {
 }
 
 /** 安全执行工具：超时 + 错误包裹 */
-async function executeTool(toolName, params = {}) {
+async function executeTool(toolName, params = {}, context = {}) {
   const tool = toolRegistry[toolName]
   if (!tool) return { ok: false, text: `未知工具：${toolName}`, error: `未知工具：${toolName}` }
 
   let timeoutId = null
   try {
     const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('执行超时')), 30000)
+      timeoutId = setTimeout(() => reject(new Error('执行超时')), TOOL_TIMEOUT_MS)
     })
-    const result = await Promise.race([tool.execute(params), timeoutPromise])
+    const result = await Promise.race([tool.execute(params, context), timeoutPromise])
 
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      const text = typeof result.text === 'string' ? result.text : JSON.stringify(result, null, 2)
+      return { ok: result.ok !== false, text, error: result.error || '', fallbackTool: result.fallbackTool || null }
+    }
     const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
     return { ok: true, text }
   } catch (err) {

@@ -69,4 +69,38 @@ function compactMessages(messages = [], maxMessages = 24) {
   return [first, summary, ...kept].filter(Boolean)
 }
 
-module.exports = { estimateTokens, truncateToolResult, externalizeToolResult, buildContextReport, compactMessages }
+function summarizeToolResult(text = '', toolName = 'tool', maxChars = 1200) {
+  const s = String(text || '')
+  if (s.length <= maxChars) return s
+  const head = s.slice(0, Math.floor(maxChars * 0.7))
+  const tail = s.slice(-Math.floor(maxChars * 0.2))
+  return `[${toolName} 结果摘要，原始 ${s.length} 字符]\n${head}\n...\n${tail}`
+}
+
+function compactOldToolResults(messages = [], keepRecent = 4, maxToolChars = 1200) {
+  if (!Array.isArray(messages)) return []
+  let seenTools = 0
+  const result = []
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m && m.role === 'tool' && typeof m.content === 'string') {
+      seenTools++
+      result.unshift(seenTools > keepRecent ? { ...m, content: summarizeToolResult(m.content, 'tool', maxToolChars) } : m)
+    } else {
+      result.unshift(m)
+    }
+  }
+  return result
+}
+
+function estimateCacheHitRate(systemMessage = '', previousSystemMessage = '') {
+  const current = String(systemMessage || '')
+  const previous = String(previousSystemMessage || '')
+  if (!current || !previous) return 0
+  const max = Math.min(current.length, previous.length)
+  let same = 0
+  while (same < max && current.charCodeAt(same) === previous.charCodeAt(same)) same++
+  return Math.round((same / Math.max(current.length, previous.length)) * 1000) / 10
+}
+
+module.exports = { estimateTokens, truncateToolResult, externalizeToolResult, buildContextReport, compactMessages, compactOldToolResults, summarizeToolResult, estimateCacheHitRate }

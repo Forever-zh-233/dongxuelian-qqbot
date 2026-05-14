@@ -23,7 +23,7 @@ async function setMode(m) {
   try { await fsp.writeFile(TOOL_MODE_FILE, mode, 'utf8') } catch {}
 }
 
-const DANGEROUS_TOOLS = new Set(['web_search', 'execute_shell', 'write_file', 'edit_file', 'execute_javascript', 'browser_action'])
+const DANGEROUS_TOOLS = new Set(['execute_shell', 'write_file', 'edit_file', 'execute_javascript', 'browser_action', 'append_file'])
 
 function getEffectivePolicy() {
   return mode === 'config' ? getDangerousPolicy() : mode

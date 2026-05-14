@@ -52,7 +52,7 @@
         <div>
           <strong>{{ tool.name }}</strong>
           <p>{{ tool.description }}</p>
-          <small>{{ tool.dangerous ? '危险工具' : '安全工具' }}</small>
+          <small>{{ tool.dangerous ? '危险工具' : (tool.external ? '外部网络工具' : '安全工具') }} · 默认 {{ (tool.defaultChannels || []).join('/') || '-' }}</small>
         </div>
         <label><input v-model="config.channels.qq.tools[tool.name]" type="checkbox" /> QQ</label>
         <label><input v-model="config.channels.dashboard.tools[tool.name]" type="checkbox" /> Dashboard</label>
@@ -68,7 +68,8 @@
         <input v-model="config.readFileRoots[index]" placeholder="留空则使用进程工作目录" />
         <button class="ghost" type="button" @click="removeReadRoot(index)">删除</button>
       </div>
-      <p v-if="config.readFileRoots.length === 0" class="muted">未配置时默认限制在当前工作目录。</p>
+      <p v-if="effectiveReadRoots.length" class="muted">实际读取根目录：{{ effectiveReadRoots.join('；') }}</p>
+      <p v-else-if="config.readFileRoots.length === 0" class="muted">未配置时默认限制在当前工作目录。</p>
     </div>
 
     <div class="section-head">
@@ -100,6 +101,7 @@
           <small>{{ item.argsSummary || '无参数摘要' }}</small>
         </div>
         <button class="ghost" type="button" :disabled="sending" @click="confirmPendingTool(item.id)">确认</button>
+        <button class="ghost" type="button" :disabled="sending" @click="rejectPendingTool(item.id)">拒绝</button>
       </div>
     </div>
 
@@ -112,7 +114,13 @@
         <strong>{{ session.title }}</strong>
         <p>{{ session.channel }} / {{ session.userName }} · {{ session.turns }} 轮 · {{ session.toolCalls }} 次工具 · {{ formatTime(session.updatedAt) }}</p>
         <small>{{ session.lastMessage }}</small>
+        <button class="ghost" type="button" @click="loadSessionDetail(session.id)">详情</button>
       </div>
+    </div>
+    <div v-if="selectedSession" class="session-row">
+      <strong>会话详情</strong>
+      <p>{{ selectedSession.id }}</p>
+      <small v-for="turn in selectedSession.turns" :key="turn.at">{{ formatTime(turn.at) }} · {{ turn.userMessage }} → {{ turn.reply }}</small>
     </div>
 
     <div v-if="stats.recent?.length" class="section-head">
@@ -121,6 +129,14 @@
     </div>
     <div v-if="stats.recent?.length" class="stats-list">
       <span v-for="item in stats.recent" :key="item.at + item.tool" class="stat-pill">{{ item.channel }} · {{ item.tool }}</span>
+    </div>
+
+    <div class="section-head">
+      <h3>Browser Agent 辅助</h3>
+      <span class="muted">browser_action {{ isBrowserToolEnabled ? '已启用' : '未启用' }}</span>
+    </div>
+    <div class="notice">
+      浏览器工具启用后仍按危险工具策略审批。可在聊天中使用：打开网页、截图、提取页面文本、tabs、pdf、cookies_get 等结构化请求。
     </div>
 
     <div class="chat-box">
@@ -141,8 +157,8 @@
 </template>
 
 <script>
-import { onMounted, reactive, ref } from 'vue'
-import { fetchAgentConfig, saveAgentConfig, sendAgentMessage, confirmAgentTool, fetchPendingAgentTools, fetchAgentSessions } from '../api'
+import { computed, inject, onMounted, reactive, ref } from 'vue'
+import { fetchAgentConfig, saveAgentConfig, sendAgentMessage, confirmAgentTool, rejectAgentTool, fetchPendingAgentTools, fetchAgentSessions, fetchAgentSession } from '../api'
 
 const defaultConfig = {
   dangerousPolicy: 'confirm',
@@ -151,7 +167,7 @@ const defaultConfig = {
     dashboard: { enabled: true, tools: {} },
   },
   autoRoute: {
-    qq: { enabled: true },
+    qq: { enabled: false },
     dashboard: { enabled: false },
   },
   enabledSkills: [],
@@ -161,6 +177,7 @@ const defaultConfig = {
 export default {
   name: 'AgentPanel',
   setup() {
+    const showAdminDialog = inject('showAdminDialog')
     const loading = ref(false)
     const saving = ref(false)
     const sending = ref(false)
@@ -174,8 +191,11 @@ export default {
     const pendingId = ref('')
     const pendingTools = ref([])
     const sessions = ref([])
+    const selectedSession = ref(null)
+    const effectiveReadRoots = ref([])
     const history = ref([])
     const config = reactive(JSON.parse(JSON.stringify(defaultConfig)))
+    const isBrowserToolEnabled = computed(() => !!config.channels.dashboard.tools.browser_action)
 
     function applyConfig(next) {
       const merged = JSON.parse(JSON.stringify({ ...defaultConfig, ...(next || {}) }))
@@ -192,6 +212,35 @@ export default {
     function formatTime(ts) {
       if (!ts) return '-'
       try { return new Date(ts).toLocaleTimeString() } catch { return '-' }
+    }
+
+    function isAdminRequired(res) {
+      return res && (res.code === 'ADMIN_REQUIRED' || res.data?.code === 'ADMIN_REQUIRED')
+    }
+
+    function requestAdmin(messageText, retry) {
+      if (showAdminDialog) showAdminDialog(messageText, retry)
+      else error.value = '需要管理员密码验证'
+    }
+
+    function normalizePendingId(value = pendingId.value) {
+      return typeof value === 'string' ? value : (pendingId.value || '')
+    }
+
+    function getAgentReply(data, fallback = '') {
+      return String(data?.reply || data?.result || data?.message || fallback || '').trim()
+    }
+
+    function persistHistory() {
+      history.value = history.value.slice(-30)
+      localStorage.setItem('dashboard_agent_history', JSON.stringify(history.value))
+    }
+
+    function pushAssistant(content) {
+      const text = String(content || '').trim()
+      if (!text) return
+      history.value.push({ role: 'assistant', content: text })
+      persistHistory()
     }
 
     async function loadPendingTools() {
@@ -216,12 +265,17 @@ export default {
       error.value = ''
       try {
         const res = await fetchAgentConfig()
+        if (isAdminRequired(res)) {
+          requestAdmin('查看 Agent 控制台需要管理员密码', loadConfig)
+          return
+        }
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '加载失败')
         applyConfig(res.data.config)
         mode.value = res.data.mode || 'config'
         tools.value = res.data.tools || []
         stats.value = res.data.stats || { total: 0 }
         skills.value = res.data.skills || []
+        effectiveReadRoots.value = Array.isArray(res.data.effectiveReadRoots) ? res.data.effectiveReadRoots : []
         for (const tool of tools.value) {
           if (config.channels.qq.tools[tool.name] === undefined) config.channels.qq.tools[tool.name] = !!tool.qqEnabled
           if (config.channels.dashboard.tools[tool.name] === undefined) config.channels.dashboard.tools[tool.name] = !!tool.dashboardEnabled
@@ -235,12 +289,23 @@ export default {
       }
     }
 
+    async function loadSessionDetail(id) {
+      try {
+        const res = await fetchAgentSession(id)
+        if (res.ok && res.data?.ok) selectedSession.value = res.data.session || null
+      } catch {}
+    }
+
     async function saveConfig() {
       saving.value = true
       error.value = ''
       message.value = ''
       try {
         const res = await saveAgentConfig({ config: JSON.parse(JSON.stringify(config)), mode: mode.value })
+        if (isAdminRequired(res)) {
+          requestAdmin('保存 Agent 配置需要管理员密码', saveConfig)
+          return
+        }
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '保存失败')
         applyConfig(res.data.config)
         mode.value = res.data.mode || mode.value
@@ -275,20 +340,44 @@ export default {
     }
 
     async function confirmPendingTool(targetId = pendingId.value) {
-      if (!targetId) return
+      const id = normalizePendingId(targetId)
+      if (!id) return
       sending.value = true
       error.value = ''
       try {
-        const res = await confirmAgentTool(targetId)
+        const res = await confirmAgentTool(id)
+        if (isAdminRequired(res)) {
+          requestAdmin('确认 Agent 工具需要管理员密码', () => confirmPendingTool(id))
+          return
+        }
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '确认失败')
-        const content = `已执行 ${res.data.toolName}：\n${res.data.result || ''}`
-        history.value.push({ role: 'assistant', content })
-        history.value = history.value.slice(-30)
-        localStorage.setItem('dashboard_agent_history', JSON.stringify(history.value))
+        pushAssistant(getAgentReply(res.data))
         pendingId.value = ''
         await loadConfig()
       } catch (e) {
         error.value = e.message || '确认失败'
+      } finally {
+        sending.value = false
+      }
+    }
+
+    async function rejectPendingTool(targetId = pendingId.value) {
+      const id = normalizePendingId(targetId)
+      if (!id) return
+      sending.value = true
+      error.value = ''
+      try {
+        const res = await rejectAgentTool(id)
+        if (isAdminRequired(res)) {
+          requestAdmin('拒绝 Agent 工具需要管理员密码', () => rejectPendingTool(id))
+          return
+        }
+        if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '拒绝失败')
+        message.value = res.data.message || '已拒绝工具请求'
+        pendingId.value = ''
+        await loadConfig()
+      } catch (e) {
+        error.value = e.message || '拒绝失败'
       } finally {
         sending.value = false
       }
@@ -304,14 +393,20 @@ export default {
       prompt.value = ''
       try {
         const res = await sendAgentMessage(text, recentHistory)
+        if (isAdminRequired(res)) {
+          const last = history.value[history.value.length - 1]
+          if (last && last.role === 'user' && last.content === text) history.value.pop()
+          prompt.value = text
+          requestAdmin('使用 Dashboard Agent 需要管理员密码', sendMessage)
+          return
+        }
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '发送失败')
-        history.value.push({ role: 'assistant', content: res.data.reply || '(无回复)' })
+        pushAssistant(getAgentReply(res.data, res.data?.pendingId ? '工具请求已进入审批队列，请确认后继续。' : '(无回复)'))
         pendingId.value = res.data.pendingId || ''
-        history.value = history.value.slice(-30)
-        localStorage.setItem('dashboard_agent_history', JSON.stringify(history.value))
+        persistHistory()
         await loadConfig()
       } catch (e) {
-        history.value.push({ role: 'assistant', content: e.message || '发送失败' })
+        pushAssistant(e.message || '发送失败')
         error.value = e.message || '发送失败'
       } finally {
         sending.value = false
@@ -319,7 +414,7 @@ export default {
     }
 
     onMounted(() => { loadHistory(); loadConfig() })
-    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, pendingId, pendingTools, sessions, history, config, formatTime, loadConfig, saveConfig, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, sendMessage }
+    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, pendingId, pendingTools, sessions, selectedSession, effectiveReadRoots, isBrowserToolEnabled, history, config, formatTime, loadConfig, saveConfig, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, rejectPendingTool, loadSessionDetail, sendMessage }
   },
 }
 </script>
@@ -350,7 +445,7 @@ textarea { min-height: 110px; resize: vertical; }
 .history-item.user { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .history-item pre { white-space: pre-wrap; margin: 6px 0 0; color: var(--text); font-family: inherit; }
 .pending-list, .session-list { display: flex; flex-direction: column; gap: 8px; }
-.pending-row, .session-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: color-mix(in srgb, var(--input) 65%, transparent); }
+.pending-row, .session-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 90px; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: color-mix(in srgb, var(--input) 65%, transparent); }
 .session-row { grid-template-columns: 1fr; }
 .pending-row p, .session-row p, .session-row small { margin: 4px 0 0; color: var(--text3); }
 .stats-list { display: flex; flex-wrap: wrap; gap: 8px; }

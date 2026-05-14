@@ -60,6 +60,39 @@ async function run(t) {
     const reload = await run(makeSession({ content: 'AI\u91cd\u8f7d' }))
     checkSentNonEmpty(t, 'scenario AI reload replies', reload)
 
+    const agentRouteOff = await run(makeSession({ content: '\u5de5\u5177\u81ea\u52a8\u8def\u7531 \u5173' }))
+    checkSentNonEmpty(t, 'scenario agent auto route switch replies', agentRouteOff)
+    t.check('scenario agent auto route writes config', data.readJson('ai-tool-config.json').autoRoute.qq.enabled === false)
+
+    const beforeToolConfig = JSON.stringify(data.readJson('ai-tool-config.json'))
+    const nonAdminToolSwitch = await run(makeSession({
+      userId: '12345',
+      author: { id: '12345', name: 'member' },
+      content: '\u5de5\u5177\u5f00\u5173 qq web_search \u5f00',
+    }))
+    checkSentNonEmpty(t, 'scenario non-admin tool switch rejected', nonAdminToolSwitch)
+    t.check('scenario non-admin tool switch does not write enabled tool', JSON.stringify(data.readJson('ai-tool-config.json')) === beforeToolConfig)
+
+    const adminToolSwitch = await run(makeSession({ content: '\u5de5\u5177\u5f00\u5173 qq web_search \u5f00' }))
+    checkSentNonEmpty(t, 'scenario admin tool switch accepted', adminToolSwitch)
+    t.check('scenario admin tool switch writes enabled tool', data.readJson('ai-tool-config.json').channels.qq.tools.web_search === true)
+
+    const agentSkillList = await run(makeSession({ content: '\u5de5\u5177Skill \u5217\u8868' }))
+    checkSentNonEmpty(t, 'scenario agent skill list replies', agentSkillList)
+    t.check('scenario agent skill list shows fixture persona', agentSkillList.sent.join('\n').includes('\u6d4b\u8bd5\u4eba\u683c'), JSON.stringify(agentSkillList.sent))
+
+    const nonAdminSkillSwitch = await run(makeSession({
+      userId: '12345',
+      author: { id: '12345', name: 'member' },
+      content: '\u5de5\u5177Skill \u5f00 \u6d4b\u8bd5\u4eba\u683c',
+    }))
+    checkSentNonEmpty(t, 'scenario non-admin agent skill switch rejected', nonAdminSkillSwitch)
+    t.check('scenario non-admin agent skill switch does not write enabled skill', !data.readJson('ai-tool-config.json').enabledSkills.includes('\u6d4b\u8bd5\u4eba\u683c'))
+
+    const adminSkillSwitch = await run(makeSession({ content: '\u5de5\u5177Skill \u5f00 \u6d4b\u8bd5\u4eba\u683c' }))
+    checkSentNonEmpty(t, 'scenario admin agent skill switch accepted', adminSkillSwitch)
+    t.check('scenario admin agent skill switch writes enabled skill', data.readJson('ai-tool-config.json').enabledSkills.includes('\u6d4b\u8bd5\u4eba\u683c'))
+
     const emotion = await run(makeSession({ content: '\u4eca\u65e5\u60c5\u7eea' }))
     checkSentNonEmpty(t, 'scenario today emotion empty cache replies', emotion)
 
