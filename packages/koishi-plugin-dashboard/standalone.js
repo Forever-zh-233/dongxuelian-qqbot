@@ -3132,6 +3132,65 @@ const server = http.createServer((req, res) => {
     return napcatProxy(req, res, pathname + url.search)
   }
 
+  if (pathname === '/dashboard/api/tools' && req.method === 'GET') {
+    try {
+      const registry = require(path.join(AI_LIB, 'agent', 'tools', 'registry'))
+      const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig(true)
+      const tools = Object.values(registry.toolRegistry).map(tool => ({
+        name: tool.definition.name,
+        description: tool.definition.description || '',
+        dangerous: !!tool.dangerous,
+        defaultChannels: tool.defaultChannels || ['dashboard', 'qq'],
+        channels: {
+          qq: !!agentConfig.channels?.qq?.tools?.[tool.definition.name],
+          dashboard: !!agentConfig.channels?.dashboard?.tools?.[tool.definition.name],
+        },
+      }))
+      return json(res, { ok: true, tools })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  const toolEnableMatch = pathname.match(/^\/dashboard\/api\/tools\/([^/]+)\/enabled$/)
+  if (toolEnableMatch && req.method === 'PUT') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const toolName = decodeURIComponent(toolEnableMatch[1])
+        const channel = ['qq', 'dashboard'].includes(data.channel) ? data.channel : 'dashboard'
+        const registry = require(path.join(AI_LIB, 'agent', 'tools', 'registry'))
+        if (!registry.toolRegistry[toolName]) return json(res, { ok: false, message: '未知工具' }, 404)
+        const saved = await require(path.join(AI_LIB, 'agent', 'config')).setToolEnabled(channel, toolName, !!data.enabled)
+        return json(res, { ok: true, config: saved })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/tools/pending' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const p = require(path.join(AI_LIB, 'agent', 'pending')).getPendingTool('dashboard', 'dashboard')
+      const pending = require(path.join(AI_LIB, 'agent', 'pending')).listPendingTools()
+      return json(res, { ok: true, pending: pending.length ? pending : (p ? [{ id: p.id, toolName: p.toolName, expireAt: p.expireAt }] : []) })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  const toolApproveMatch = pathname.match(/^\/dashboard\/api\/tools\/pending\/([^/]+)\/approve$/)
+  if (toolApproveMatch && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    ;(async () => {
+      try {
+        const pending = require(path.join(AI_LIB, 'agent', 'pending'))
+        const p = pending.getPendingTool('dashboard', 'dashboard')
+        if (!p || p.id !== decodeURIComponent(toolApproveMatch[1])) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
+        const result = await pending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', decodeURIComponent(toolApproveMatch[1]))
+        return json(res, { ok: result.ok, toolName: result.toolName, result: result.result, message: result.message || result.error || '' }, result.ok ? 200 : (result.status || 500))
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })()
+    return
+  }
+
   // Agent 工具配置与控制台
   if (pathname === '/dashboard/api/agent/config' && req.method === 'GET') {
     try {
@@ -3140,13 +3199,15 @@ const server = http.createServer((req, res) => {
       const safety = require(path.join(AI_LIB, 'agent', 'safety'))
       const stats = require(path.join(AI_LIB, 'agent', 'stats')).getStats()
       const skills = require(path.join(AI_LIB, 'agent', 'skills')).listAgentSkills()
+      const qqEnabledTools = new Set(registry.getToolDefinitions('qq').map(item => item.function.name))
+      const dashboardEnabledTools = new Set(registry.getToolDefinitions('dashboard').map(item => item.function.name))
       const tools = Object.values(registry.toolRegistry).map(tool => ({
         name: tool.definition.name,
         description: tool.definition.description || '',
         dangerous: !!tool.dangerous,
         defaultChannels: tool.defaultChannels || ['dashboard', 'qq'],
-        qqEnabled: registry.getToolDefinitions('qq').some(item => item.function.name === tool.definition.name),
-        dashboardEnabled: registry.getToolDefinitions('dashboard').some(item => item.function.name === tool.definition.name),
+        qqEnabled: qqEnabledTools.has(tool.definition.name),
+        dashboardEnabled: dashboardEnabledTools.has(tool.definition.name),
       }))
       return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills })
     } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
@@ -3167,21 +3228,48 @@ const server = http.createServer((req, res) => {
     return
   }
 
+  if (pathname === '/dashboard/api/agent/sessions' && req.method === 'GET') {
+    try {
+      const sessions = require(path.join(AI_LIB, 'agent', 'sessions')).listAgentSessions()
+      return json(res, { ok: true, sessions })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
   if (pathname === '/dashboard/api/agent/chat' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
     collectBody(req, res, async (body) => {
       try {
         const data = JSON.parse(body || '{}')
         const message = String(data.message || '').trim()
         if (!message) return json(res, { ok: false, message: '消息不能为空' }, 400)
         const engine = require(path.join(AI_LIB, 'agent', 'engine'))
+        const history = require(path.join(AI_LIB, 'agent', 'messages')).sanitizeAgentHistory(data.history)
         const result = await engine.run({
           userMessage: message,
           userName: String(data.userName || 'Dashboard'),
           userId: 'dashboard',
           channelKey: 'dashboard',
           channel: 'dashboard',
+          history,
         })
         return json(res, { ok: true, ...result })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/confirm' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const pending = require(path.join(AI_LIB, 'agent', 'pending'))
+        const data = JSON.parse(body || '{}')
+        const expectedId = String(data.pendingId || '')
+        const p = pending.getPendingTool('dashboard', 'dashboard')
+        if (!p) return json(res, { ok: false, message: '没有待确认工具' }, 404)
+        if (expectedId && p.id !== expectedId) return json(res, { ok: false, message: '没有匹配的待确认工具' }, 404)
+        const result = await pending.confirmPendingTool('dashboard', 'dashboard', 'dashboard', expectedId)
+        return json(res, { ok: result.ok, toolName: result.toolName, result: result.result, message: result.message || result.error || '' }, result.ok ? 200 : (result.status || 500))
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })
     return

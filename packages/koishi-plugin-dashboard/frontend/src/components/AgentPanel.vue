@@ -37,6 +37,10 @@
         <input v-model="config.channels.dashboard.enabled" type="checkbox" />
         <span>Dashboard Agent</span>
       </label>
+      <label class="switch-row">
+        <input v-model="config.autoRoute.qq.enabled" type="checkbox" />
+        <span>QQ 自动路由</span>
+      </label>
     </div>
 
     <div class="section-head">
@@ -56,15 +60,28 @@
     </div>
 
     <div class="section-head">
+      <h3>文件读取根目录</h3>
+      <button class="ghost" type="button" @click="addReadRoot">添加</button>
+    </div>
+    <div class="root-list">
+      <div v-for="(root, index) in config.readFileRoots" :key="index" class="root-row">
+        <input v-model="config.readFileRoots[index]" placeholder="留空则使用进程工作目录" />
+        <button class="ghost" type="button" @click="removeReadRoot(index)">删除</button>
+      </div>
+      <p v-if="config.readFileRoots.length === 0" class="muted">未配置时默认限制在当前工作目录。</p>
+    </div>
+
+    <div class="section-head">
       <h3>Skill 索引</h3>
       <span class="muted">只读预览 {{ skills.length }} 个</span>
     </div>
     <div class="skill-list">
-      <div v-for="skill in skills" :key="skill.file" class="skill-row">
+      <label v-for="skill in skills" :key="skill.file" class="skill-row">
+        <input v-model="config.enabledSkills" type="checkbox" :value="skill.name" />
         <strong>{{ skill.name }}</strong>
         <span>{{ skill.kind }}</span>
         <p>{{ skill.description || '无描述' }}</p>
-      </div>
+      </label>
     </div>
 
     <div class="section-head">
@@ -73,15 +90,24 @@
     </div>
     <div class="chat-box">
       <textarea v-model="prompt" placeholder="例如：读取 package.json 总结项目脚本" @keydown.ctrl.enter.prevent="sendMessage"></textarea>
-      <button class="primary" type="button" :disabled="sending || !prompt.trim()" @click="sendMessage">发送</button>
+      <div class="chat-actions">
+        <button class="primary" type="button" :disabled="sending || !prompt.trim()" @click="sendMessage">发送</button>
+        <button class="ghost" type="button" :disabled="sending || !pendingId" @click="confirmPendingTool">确认工具</button>
+        <button class="ghost" type="button" :disabled="sending || history.length === 0" @click="clearHistory">清空</button>
+      </div>
     </div>
-    <pre v-if="reply" class="reply">{{ reply }}</pre>
+    <div v-if="history.length" class="history-list">
+      <div v-for="(item, index) in history" :key="index" class="history-item" :class="item.role">
+        <strong>{{ item.role === 'user' ? '你' : 'Agent' }}</strong>
+        <pre>{{ item.content }}</pre>
+      </div>
+    </div>
   </section>
 </template>
 
 <script>
 import { onMounted, reactive, ref } from 'vue'
-import { fetchAgentConfig, saveAgentConfig, sendAgentMessage } from '../api'
+import { fetchAgentConfig, saveAgentConfig, sendAgentMessage, confirmAgentTool, fetchPendingAgentTools } from '../api'
 
 const defaultConfig = {
   dangerousPolicy: 'confirm',
@@ -89,6 +115,11 @@ const defaultConfig = {
     qq: { enabled: true, tools: {} },
     dashboard: { enabled: true, tools: {} },
   },
+  autoRoute: {
+    qq: { enabled: true },
+    dashboard: { enabled: false },
+  },
+  enabledSkills: [],
   readFileRoots: [],
 }
 
@@ -105,7 +136,8 @@ export default {
     const skills = ref([])
     const stats = ref({ total: 0 })
     const prompt = ref('')
-    const reply = ref('')
+    const pendingId = ref('')
+    const history = ref([])
     const config = reactive(JSON.parse(JSON.stringify(defaultConfig)))
 
     function applyConfig(next) {
@@ -115,7 +147,16 @@ export default {
       for (const channel of ['qq', 'dashboard']) {
         config.channels[channel].enabled = !!merged.channels?.[channel]?.enabled
         config.channels[channel].tools = { ...(merged.channels?.[channel]?.tools || {}) }
+        config.autoRoute[channel].enabled = !!merged.autoRoute?.[channel]?.enabled
       }
+      config.enabledSkills = Array.isArray(merged.enabledSkills) ? merged.enabledSkills.slice() : []
+    }
+
+    async function loadPendingTools() {
+      try {
+        const res = await fetchPendingAgentTools()
+        if (res.ok && res.data?.ok) pendingId.value = res.data.pending?.[0]?.id || ''
+      } catch {}
     }
 
     async function loadConfig() {
@@ -133,6 +174,7 @@ export default {
           if (config.channels.qq.tools[tool.name] === undefined) config.channels.qq.tools[tool.name] = !!tool.qqEnabled
           if (config.channels.dashboard.tools[tool.name] === undefined) config.channels.dashboard.tools[tool.name] = !!tool.dashboardEnabled
         }
+        await loadPendingTools()
       } catch (e) {
         error.value = e.message || '加载失败'
       } finally {
@@ -157,26 +199,74 @@ export default {
       }
     }
 
+    function addReadRoot() {
+      config.readFileRoots.push('')
+    }
+
+    function removeReadRoot(index) {
+      config.readFileRoots.splice(index, 1)
+    }
+
+    function loadHistory() {
+      try {
+        const saved = JSON.parse(localStorage.getItem('dashboard_agent_history') || '[]')
+        history.value = Array.isArray(saved) ? saved.filter(item => item && ['user', 'assistant'].includes(item.role)).slice(-30) : []
+      } catch {
+        history.value = []
+      }
+    }
+
+    function clearHistory() {
+      history.value = []
+      localStorage.removeItem('dashboard_agent_history')
+    }
+
+    async function confirmPendingTool() {
+      if (!pendingId.value) return
+      sending.value = true
+      error.value = ''
+      try {
+        const res = await confirmAgentTool(pendingId.value)
+        if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '确认失败')
+        const content = `已执行 ${res.data.toolName}：\n${res.data.result || ''}`
+        history.value.push({ role: 'assistant', content })
+        history.value = history.value.slice(-30)
+        localStorage.setItem('dashboard_agent_history', JSON.stringify(history.value))
+        pendingId.value = ''
+        await loadConfig()
+      } catch (e) {
+        error.value = e.message || '确认失败'
+      } finally {
+        sending.value = false
+      }
+    }
+
     async function sendMessage() {
       const text = prompt.value.trim()
       if (!text) return
       sending.value = true
       error.value = ''
-      reply.value = ''
+      const recentHistory = history.value.slice(-10)
+      history.value.push({ role: 'user', content: text })
+      prompt.value = ''
       try {
-        const res = await sendAgentMessage(text)
+        const res = await sendAgentMessage(text, recentHistory)
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '发送失败')
-        reply.value = res.data.reply || '(无回复)'
+        history.value.push({ role: 'assistant', content: res.data.reply || '(无回复)' })
+        pendingId.value = res.data.pendingId || ''
+        history.value = history.value.slice(-30)
+        localStorage.setItem('dashboard_agent_history', JSON.stringify(history.value))
         await loadConfig()
       } catch (e) {
+        history.value.push({ role: 'assistant', content: e.message || '发送失败' })
         error.value = e.message || '发送失败'
       } finally {
         sending.value = false
       }
     }
 
-    onMounted(loadConfig)
-    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, reply, config, loadConfig, saveConfig, sendMessage }
+    onMounted(() => { loadHistory(); loadConfig() })
+    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, pendingId, history, config, loadConfig, saveConfig, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, sendMessage }
   },
 }
 </script>
@@ -194,19 +284,26 @@ textarea { min-height: 110px; resize: vertical; }
 .tool-list, .skill-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
 .tool-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 130px; gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }
 .tool-row:last-child, .skill-row:last-child { border-bottom: 0; }
-.skill-row { display: grid; grid-template-columns: minmax(120px, .5fr) 90px minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }
+.skill-row { display: grid; grid-template-columns: 24px minmax(120px, .5fr) 90px minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }
 .skill-row p { margin: 0; color: var(--text3); }
 .tool-row.danger { background: color-mix(in srgb, #ef4444 8%, transparent); }
 .tool-row small { color: var(--text3); }
 .chat-box { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; align-items: stretch; }
-.reply { white-space: pre-wrap; border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: color-mix(in srgb, var(--input) 75%, transparent); color: var(--text); max-height: 360px; overflow: auto; }
+.root-list { display: flex; flex-direction: column; gap: 8px; }
+.root-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px; gap: 8px; }
+.root-row input { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--input); color: var(--text); padding: 10px; }
+.history-list { display: flex; flex-direction: column; gap: 10px; }
+.history-item { border: 1px solid var(--border); border-radius: 14px; padding: 12px; background: color-mix(in srgb, var(--input) 65%, transparent); }
+.history-item.user { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.history-item pre { white-space: pre-wrap; margin: 6px 0 0; color: var(--text); font-family: inherit; }
+.chat-actions { display: flex; flex-direction: column; gap: 8px; }
 .notice { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 12px; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .notice.error { border-color: color-mix(in srgb, #ef4444 55%, var(--border)); background: color-mix(in srgb, #ef4444 12%, transparent); }
 .primary, .ghost { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); background: var(--input); cursor: pointer; }
 .primary { background: color-mix(in srgb, var(--accent) 24%, var(--input)); }
 button:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 760px) {
-  .panel-head, .section-head, .chat-box { grid-template-columns: 1fr; display: grid; }
+  .panel-head, .section-head, .chat-box, .root-row { grid-template-columns: 1fr; display: grid; }
   .tool-row, .skill-row { grid-template-columns: 1fr; }
 }
 </style>

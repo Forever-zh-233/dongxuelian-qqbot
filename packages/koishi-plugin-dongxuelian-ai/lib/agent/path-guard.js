@@ -1,0 +1,75 @@
+/**
+ * MODULE: Agent 路径边界校验。
+ * 职责: 统一允许根目录、realpath 归一化和工作区内判断。
+ * 边界: 不读写目标文件内容、不执行工具。
+ * 状态: 无。
+ */
+const fs = require('fs/promises')
+const path = require('path')
+const { getReadFileRoots } = require('./config')
+
+function normalizeAgentPathCase(value) {
+  const resolved = path.resolve(String(value || ''))
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+}
+
+function isAgentPathInside(target, root) {
+  const absTarget = normalizeAgentPathCase(target)
+  const absRoot = normalizeAgentPathCase(root)
+  return absTarget === absRoot || absTarget.startsWith(absRoot + path.sep)
+}
+
+function getAgentPathConfiguredRoots() {
+  const roots = getReadFileRoots()
+  return roots.length > 0 ? roots : [process.cwd()]
+}
+
+async function realpathOrResolvedAgentPath(target) {
+  try { return await fs.realpath(path.resolve(target)) } catch { return path.resolve(target) }
+}
+
+async function getAgentPathAllowedRoots() {
+  const result = []
+  for (const root of getAgentPathConfiguredRoots()) {
+    result.push(await realpathOrResolvedAgentPath(root))
+  }
+  return result
+}
+
+async function assertExistingAgentPathInsideRoots(target, label = '路径') {
+  const abs = path.resolve(String(target || ''))
+  const real = await fs.realpath(abs).catch(() => null)
+  if (!real) throw new Error(`${label}不存在：${abs}`)
+  const roots = await getAgentPathAllowedRoots()
+  if (!roots.some(root => isAgentPathInside(real, root))) throw new Error(`${label}超出允许范围：${abs}`)
+  return { abs, real, roots }
+}
+
+async function assertNewAgentPathInsideRoots(target, label = '路径', createDirectories = false) {
+  const abs = path.resolve(String(target || ''))
+  const roots = await getAgentPathAllowedRoots()
+  let parent = path.dirname(abs)
+  let realParent = await fs.realpath(parent).catch(() => null)
+  if (!realParent && createDirectories) {
+    while (!realParent && parent !== path.dirname(parent)) {
+      parent = path.dirname(parent)
+      realParent = await fs.realpath(parent).catch(() => null)
+    }
+  }
+  if (!realParent) throw new Error(`父目录不存在：${path.dirname(abs)}`)
+  if (!roots.some(root => isAgentPathInside(realParent, root))) throw new Error(`${label}超出允许范围：${abs}`)
+  return { abs, realParent, roots }
+}
+
+async function resolveAgentDefaultRoot() {
+  const roots = await getAgentPathAllowedRoots()
+  return roots[0] || process.cwd()
+}
+
+module.exports = {
+  isAgentPathInside,
+  getAgentPathAllowedRoots,
+  assertExistingAgentPathInsideRoots,
+  assertNewAgentPathInsideRoots,
+  resolveAgentDefaultRoot,
+}

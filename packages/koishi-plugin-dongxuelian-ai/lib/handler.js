@@ -725,6 +725,53 @@ async function handleCommand(session, ctx, state) {
     return handled(`工具安全模式：${labels[m]} (${m})`)
   }
 
+  if (/^(?:东雪莲)?工具自动路由\s*(开|关|on|off)$/.test(plain)) {
+    if (!hasAdminPermission(session)) return handled('只有管理员能操作此命令。')
+    const enabled = /^(?:开|on)$/i.test(RegExp.$1)
+    const agentConfig = require('./agent/config')
+    const config = agentConfig.getAgentConfig()
+    config.autoRoute.qq.enabled = enabled
+    await agentConfig.saveAgentConfig(config)
+    return handled(`QQ Agent 自动路由：${enabled ? '开启' : '关闭'}`)
+  }
+
+  const toolSwitchMatch = plain.match(/^(?:东雪莲)?工具开关\s+(qq|dashboard)\s+([a-zA-Z0-9_-]+)\s+(开|关|on|off)$/)
+  if (toolSwitchMatch) {
+    if (!hasAdminPermission(session)) return handled('只有管理员能操作此命令。')
+    const [, channel, toolName, rawEnabled] = toolSwitchMatch
+    const enabled = /^(?:开|on)$/i.test(rawEnabled)
+    const registry = require('./agent/tools/registry')
+    if (!registry.toolRegistry[toolName]) return handled(`未知工具：${toolName}`)
+    await require('./agent/config').setToolEnabled(channel, toolName, enabled)
+    return handled(`${channel} 工具 ${toolName}：${enabled ? '开启' : '关闭'}`)
+  }
+
+  const skillSwitchMatch = plain.match(/^(?:东雪莲)?工具Skill\s+(开|关|on|off)\s+(.+)$/i)
+  if (skillSwitchMatch) {
+    if (!hasAdminPermission(session)) return handled('只有管理员能操作此命令。')
+    const enabled = /^(?:开|on)$/i.test(skillSwitchMatch[1])
+    const skillName = skillSwitchMatch[2].trim()
+    const agentSkills = require('./agent/skills')
+    const known = agentSkills.listAgentSkills().some(skill => skill.name === skillName)
+    if (!known) return handled(`未知 Agent Skill：${skillName}`)
+    const agentConfig = require('./agent/config')
+    const config = agentConfig.getAgentConfig()
+    const current = new Set(config.enabledSkills || [])
+    if (enabled) current.add(skillName)
+    else current.delete(skillName)
+    config.enabledSkills = Array.from(current).slice(0, 32)
+    await agentConfig.saveAgentConfig(config)
+    return handled(`Agent Skill ${skillName}：${enabled ? '启用' : '禁用'}`)
+  }
+
+  if (/^(?:东雪莲)?工具Skill\s*(?:列表|list)?$/i.test(plain)) {
+    const agentConfig = require('./agent/config').getAgentConfig()
+    const enabled = new Set(agentConfig.enabledSkills || [])
+    const skills = require('./agent/skills').listAgentSkills().slice(0, 20)
+    if (skills.length === 0) return handled('暂无 Agent Skill。')
+    return handled(skills.map(skill => `${enabled.has(skill.name) ? '✅' : '□'} ${skill.name}（${skill.kind}）：${skill.description || '无描述'}`).join('\n'))
+  }
+
   if (/^(?:东雪莲)?工具状态$/.test(plain)) {
     const safety = require('./agent/safety')
     const agentConfig = require('./agent/config').getAgentConfig()
@@ -734,7 +781,7 @@ async function handleCommand(session, ctx, state) {
     const dashboardTools = registry.getToolDefinitions('dashboard').map(item => item.function.name).join(', ') || '无'
     return handled([
       `工具安全模式：${safety.getMode()}（危险工具策略：${agentConfig.dangerousPolicy}）`,
-      `QQ Agent：${agentConfig.channels.qq.enabled ? '开启' : '关闭'} / ${qqTools}`,
+      `QQ Agent：${agentConfig.channels.qq.enabled ? '开启' : '关闭'} / 自动路由：${agentConfig.autoRoute?.qq?.enabled ? '开启' : '关闭'} / ${qqTools}`,
       `Dashboard Agent：${agentConfig.channels.dashboard.enabled ? '开启' : '关闭'} / ${dashboardTools}`,
       `可注册工具：${registry.getToolCount()} 个`,
       `累计调用：${stats.total} 次`,
@@ -769,16 +816,11 @@ async function handleCommand(session, ctx, state) {
   // === Agent 待确认处理 ===
   if (plain === '确认工具' || plain === 'y' || plain === 'Y') {
     const pending = require('./agent/pending')
-    const registry = require('./agent/tools/registry')
     const p = pending.getPendingTool(channelKey, currentUserId)
     if (p) {
-      pending.clearPendingTool(channelKey, currentUserId)
-      try {
-        const result = await registry.executeTool(p.toolName, p.args || {})
-        return handled(`已执行 ${p.toolName}：\n${result.slice(0, 500)}`)
-      } catch (err) {
-        return handled(`执行失败：${err.message}`)
-      }
+      const result = await pending.confirmPendingTool(channelKey, currentUserId, 'qq')
+      if (!result.ok) return handled(`执行失败：${result.message || result.error || '未知错误'}`)
+      return handled(`已执行 ${result.toolName}：\n${String(result.result || '').slice(0, 500)}`)
     }
   }
 
