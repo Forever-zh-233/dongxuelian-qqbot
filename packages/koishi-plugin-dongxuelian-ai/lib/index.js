@@ -113,8 +113,9 @@ const {
   todayCst,
 } = require('./utils')
 const { logDebug } = require('./logging-config')
-const { heuristicRoute, llmRoute, buildExplicitSearchRunOptions } = require('./agent/router')
+const { heuristicRoute, buildExplicitSearchRunOptions } = require('./agent/router')
 const agentEngine = require('./agent/engine')
+const { startMcp, stopMcp } = require('./mcp')
 const { enqueueAgentTask, configureAgentQueue } = require('./agent/queue')
 const { recordAgentChatResult } = require('./agent-chat-bridge')
 
@@ -283,6 +284,29 @@ function restoreTodayCacheEntry(key, data) {
 // 格式: { "userId": "personaName" }
 
 // 计算最终 persona：用户级 > 群级 > 默认
+
+function handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText, randomTriggered }) {
+  if (chatResult && typeof chatResult === 'object' && chatResult.heavyToolsRequested) {
+    safeSendReply(ctx, session, chatResult.text, randomTriggered)
+    const agentConfig = require('./agent/config').getAgentConfig()
+    configureAgentQueue(agentConfig.queue || {})
+    const searchQuery = chatResult.heavyToolsRequested.find(t => t.name === 'web_search')?.args?.query || userText
+    const searchRunOptions = buildExplicitSearchRunOptions(searchQuery)
+    enqueueAgentTask({
+      channelKey,
+      userId: currentUserId,
+      timeoutMs: agentConfig.queue?.timeoutMs,
+      fn: () => agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions }),
+    }).then(agentResult => {
+      recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult })
+      return safeSendReply(ctx, session, agentResult.reply || '(搜索未获取有效结果)', false)
+    }).catch(error => {
+      ctx.logger('dongxuelian-ai').warn(`chat heavy-tool agent failed: ${error.message}`)
+    })
+    return null
+  }
+  return typeof chatResult === 'string' ? chatResult : (chatResult?.text || chatResult || '')
+}
 
 function enqueueForChannel(channelKey, fn, maxDepth) {
   const existing = channelQueues.get(channelKey) || Promise.resolve()
@@ -662,6 +686,7 @@ exports.apply = (ctx) => {
     } catch (error) {
       ctx.logger('dongxuelian-ai').warn(`agent cron scheduler restore failed: ${error.message}`)
     }
+    startMcp(ctx.logger('dongxuelian-ai'))
     ctx.logger('dongxuelian-ai').info(`dongxuelian-ai ${PLUGIN_VERSION} loaded`)
   })
 
@@ -1022,7 +1047,7 @@ exports.apply = (ctx) => {
           channelPendingRandom.delete(channelKey)
           if (p && shouldTriggerRandom(Math.min(getRandomTriggerRate(channelKey) * willFactor, 1.0))) {
             channelMissCount.set(channelKey, 0)
-            enqueueForChannel(channelKey, () => chat(session, p.combinedText, ctx, { randomTriggered: true, sharedContextNote: p.sharedContextNote, quotedMessageNote: p.quotedMessageNote, forwardSummaryText: p.forwardSummaryText, replyToId: p.replyToId }).then(reply => safeSendReply(ctx, session, reply, true)), 4)
+            enqueueForChannel(channelKey, () => chat(session, p.combinedText, ctx, { randomTriggered: true, sharedContextNote: p.sharedContextNote, quotedMessageNote: p.quotedMessageNote, forwardSummaryText: p.forwardSummaryText, replyToId: p.replyToId }).then(chatResult => { const reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText: p.combinedText, randomTriggered: true }); if (reply) safeSendReply(ctx, session, reply, true) }), 4)
           } else {
             channelMissCount.set(channelKey, (channelMissCount.get(channelKey) || 0) + 1)
           }
@@ -1109,43 +1134,6 @@ exports.apply = (ctx) => {
           const reply = pickJailbreakFallbackReply()
           return safeSendReply(ctx, session, reply, randomTriggered)
         }
-        if (route.reason === 'needs-llm') {
-          const agentConfig = require('./agent/config').getAgentConfig()
-          configureAgentQueue(agentConfig.queue || {})
-          enqueueAgentTask({
-            channelKey,
-            userId: currentUserId,
-            timeoutMs: agentConfig.queue?.timeoutMs,
-            fn: async () => {
-              const nextRoute = await llmRoute(userText, 'qq')
-              if (nextRoute?.useAgent) {
-                logDebug(ctx, 'agent', `auto-route async reason=${nextRoute.reason} channel=${channelKey}`)
-                const searchRunOptions = buildExplicitSearchRunOptions(userText)
-                return agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions })
-              }
-              const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
-              return { reply, normalChat: true }
-            },
-          }).then(result => {
-            if (result?.normalChat && inGuild && /别问了，这个我不聊/.test(result.reply)) {
-              notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})
-            }
-            if (result && !result.normalChat) {
-              recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult: result })
-            }
-            return safeSendReply(ctx, session, result?.reply || '(Agent 未获取有效回复)', randomTriggered)
-          }).catch(async error => {
-            const code = error && error.code ? String(error.code) : ''
-            if (code === 'AGENT_QUEUE_FULL' || code === 'AGENT_QUEUE_REJECTED') {
-              try {
-                const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
-                return safeSendReply(ctx, session, reply, randomTriggered)
-              } catch {}
-            }
-            ctx.logger('dongxuelian-ai').warn(`agent async route failed: ${error.message}`)
-          })
-          return
-        }
         if (route.useAgent) {
           logDebug(ctx, 'agent', `auto-route reason=${route.reason} channel=${channelKey}`)
           const searchRunOptions = buildExplicitSearchRunOptions(userText)
@@ -1167,7 +1155,9 @@ exports.apply = (ctx) => {
           })
           return
         }
-        const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
+        const chatResult = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
+        const reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText, randomTriggered })
+        if (reply === null) return
         if (inGuild && /别问了，这个我不聊/.test(reply)) {
           notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})
         }

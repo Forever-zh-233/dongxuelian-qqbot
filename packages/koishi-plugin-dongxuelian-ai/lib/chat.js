@@ -45,6 +45,7 @@ const {
   channelSharedCache,
 } = require('./conversation')
 const { getRecentAgentContextNote } = require('./agent-chat-bridge')
+const { getChatToolDefinitions, handleChatToolCalls, getChatToolSystemHint } = require('./chat-tools')
 const { normalizeText } = require('./message-reader')
 const {
   isRareProvocation, isWideRareProvocation, isHostileInput,
@@ -288,7 +289,7 @@ function buildAbusiveSystemPrompt() {
 // 通过 OpenAI 官方 Responses API 调用 `web_search` 工具。
 
 // 按当前接口能力选择普通对话或联网检索调用方式。
-async function callOpenAI(messages, isRandom, extraBody = {}) {
+async function callOpenAI(messages, isRandom, extraBody = {}, tools = null) {
   const config = await loadConfig()
   if (!config.apiKey) throw new Error('AI key file is empty.')
   const thinkingEnabled = getThinkingEnabled()
@@ -300,17 +301,20 @@ async function callOpenAI(messages, isRandom, extraBody = {}) {
 
   const capability = getSearchCapability(config)
   if (!config.searchEnabled || !capability.supported) {
-    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta })
+    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta }, tools)
+    if (result && result.type === 'tool_calls') return result
     return typeof result === 'string' ? result : result.content
   }
 
   if (capability.mode === 'dashscope-chat') {
-    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), enable_search: true, search_options: { forced_search: true }, ...extraBody, ...managedThinkingMeta })
+    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), enable_search: true, search_options: { forced_search: true }, ...extraBody, ...managedThinkingMeta }, tools)
+    if (result && result.type === 'tool_calls') return result
     return typeof result === 'string' ? result : result.content
   }
 
   if (capability.mode === 'openai-chat-search') {
-    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), web_search_options: {}, ...extraBody, ...managedThinkingMeta })
+    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), web_search_options: {}, ...extraBody, ...managedThinkingMeta }, tools)
+    if (result && result.type === 'tool_calls') return result
     return typeof result === 'string' ? result : result.content
   }
 
@@ -318,7 +322,8 @@ async function callOpenAI(messages, isRandom, extraBody = {}) {
     return requestOpenAIResponsesWithSearch(messages, config)
   }
 
-  const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta })
+  const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta }, tools)
+  if (result && result.type === 'tool_calls') return result
   return typeof result === 'string' ? result : result.content
 }
 
@@ -827,7 +832,44 @@ async function chat(session, userText, ctx, options = {}) {
     })
   }
 
-  let reply = await callOpenAI(messages, options.randomTriggered)
+  // Chat 轻量工具注入
+  const chatTools = getChatToolDefinitions()
+  messages.push({ role: 'system', content: getChatToolSystemHint() })
+
+  let reply = await callOpenAI(messages, options.randomTriggered, {}, chatTools)
+
+  // 处理 tool_calls 响应
+  if (reply && typeof reply === 'object' && reply.type === 'tool_calls') {
+    const toolContext = { userId: currentUserId, channelKey }
+    const { results, heavyTools } = await handleChatToolCalls(reply.tool_calls, toolContext)
+
+    if (heavyTools.length > 0) {
+      const heavyToolsRequested = heavyTools.map(tc => {
+        let args = {}
+        try { args = JSON.parse(tc.function?.arguments || '{}') } catch {}
+        return { name: tc.function?.name, args }
+      })
+      messages.push({ role: 'assistant', content: null, tool_calls: reply.tool_calls })
+      for (const r of results) messages.push(r)
+      for (const ht of heavyTools) {
+        messages.push({ role: 'tool', tool_call_id: ht.id, content: '该工具需要更多时间处理，稍后会给出结果。' })
+      }
+      const followUp = await callOpenAI(messages, options.randomTriggered)
+      const followUpText = typeof followUp === 'string' ? followUp : (followUp?.content || '我查一下，稍等。')
+      return { text: followUpText, heavyToolsRequested }
+    }
+
+    if (results.length > 0) {
+      messages.push({ role: 'assistant', content: null, tool_calls: reply.tool_calls })
+      for (const r of results) messages.push(r)
+      reply = await callOpenAI(messages, options.randomTriggered)
+      if (reply && typeof reply === 'object' && reply.type === 'tool_calls') {
+        reply = reply.message?.content || ''
+      }
+    } else {
+      reply = reply.message?.content || ''
+    }
+  }
 
   // 记录 AI 提问"需要记住"的时间戳，供 memory 确认超时使用
   if (/需要.{0,10}记住/.test(reply)) {

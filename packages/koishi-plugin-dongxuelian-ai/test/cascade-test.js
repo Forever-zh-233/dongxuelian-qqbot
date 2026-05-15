@@ -728,7 +728,7 @@ async function main() {
       'listSkillHubItems', 'findSkillHubItem', 'setSkillHubEnabled', 'formatSkillHubItems',
     ],
     agentRouter: [
-      'heuristicRoute', 'llmRoute', 'isExplicitSearchRequest', 'buildExplicitSearchRunOptions',
+      'heuristicRoute', 'isExplicitSearchRequest', 'buildExplicitSearchRunOptions',
     ],
     agentSessions: [
       'buildAgentSessionId', 'recordAgentSession', 'listAgentSessions', 'getAgentSession', 'clearAgentSessions',
@@ -1353,9 +1353,9 @@ async function main() {
   check('agent explicit search plans official-first query', explicitSearchOptions.preExecuteTools?.[0]?.args?.query.includes('鸣潮') && /新角色|新共鸣者|鸣潮游戏/i.test(explicitSearchOptions.preExecuteTools?.[0]?.args?.query || ''))
   check('agent explicit search passes query candidates', Array.isArray(explicitSearchOptions.preExecuteTools?.[0]?.args?.queries) && explicitSearchOptions.preExecuteTools[0].args.queries.length >= 2)
   await modules.agentConfig.patchAgentConfig({ autoRoute: { qq: { enabled: true }, dashboard: { enabled: false } } })
-  check('agent auto route detects time question when enabled', modules.agentRouter.heuristicRoute('现在几点了', 'qq').useAgent)
+  check('agent auto route detects time question as chat-with-tools', !modules.agentRouter.heuristicRoute('现在几点了', 'qq').useAgent)
   check('agent auto route ignores casual greeting', !modules.agentRouter.heuristicRoute('你好', 'qq').useAgent)
-  check('agent auto route marks weak tool question for LLM', modules.agentRouter.heuristicRoute('帮我看看这个怎么弄', 'qq').reason === 'needs-llm')
+  check('agent auto route marks weak tool question as chat-with-tools', modules.agentRouter.heuristicRoute('帮我看看这个怎么弄', 'qq').reason === 'chat-with-tools')
   await modules.agentConfig.patchAgentConfig({ autoRoute: { qq: { enabled: false }, dashboard: { enabled: false } } })
   const pendingId = modules.agentPending.setPendingTool('g1', 'u1', { toolName: 'calculate', args: { expression: '1+1' }, channel: 'qq' })
   check('agent pending stores id', typeof pendingId === 'string' && pendingId.startsWith('pnd'))

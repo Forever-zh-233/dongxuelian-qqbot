@@ -103,6 +103,18 @@ async function browserSearch(queries, reason) {
 }
 
 async function fallbackSearch(queries, reason) {
+  // MCP 远程浏览器优先
+  try {
+    const mcp = require('../../mcp')
+    if (mcp.isAvailable()) {
+      const query = Array.isArray(queries) ? queries[0] : String(queries)
+      const result = await mcp.callTool('browser_search', { query })
+      if (result.ok && result.content && result.content.length > 0) {
+        const text = result.content.map(c => c.text || '').join('\n').trim()
+        if (text.length > 20) return `${reason}\n已通过 MCP 远程浏览器搜索。\n${text}`
+      }
+    }
+  } catch {}
   const httpResult = await runHttpSearch(queries)
   if (httpResult.ok) return `${reason}\n已改用轻量 HTTP 搜索（未启动 Chromium）。\n${httpResult.text}`
   if (isBrowserSearchEnabled()) {
