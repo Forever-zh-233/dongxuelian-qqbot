@@ -438,6 +438,7 @@ async function main() {
   check('npm check includes AI agent persona context syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/persona-context.js'))
   check('npm check includes AI agent search query syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/search-query.js'))
   check('npm check includes AI agent registry syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/registry.js'))
+  check('npm check includes AI read agent skill tool syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/read-agent-skill.js'))
   check('npm check includes AI agent tool syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/calculator.js'))
   check('npm check includes AI retaliation syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/retaliation.js'))
   check('npm check includes dashboard standalone syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dashboard/standalone.js'))
@@ -506,6 +507,7 @@ async function main() {
     agentContext: path.join(LIB, 'agent', 'context'),
     agentPersonaContext: path.join(LIB, 'agent', 'persona-context'),
     agentSearchQuery: path.join(LIB, 'agent', 'search-query'),
+    agentSearchResults: path.join(LIB, 'agent', 'search-results'),
     agentQueue: path.join(LIB, 'agent', 'queue'),
     agentMemory: path.join(LIB, 'agent', 'memory'),
     agentPush: path.join(LIB, 'agent', 'push'),
@@ -527,6 +529,7 @@ async function main() {
     agentToolTime: path.join(LIB, 'agent', 'tools', 'get-time'),
     agentToolCalculator: path.join(LIB, 'agent', 'tools', 'calculator'),
     agentToolWebSearch: path.join(LIB, 'agent', 'tools', 'web-search'),
+    agentToolReadAgentSkill: path.join(LIB, 'agent', 'tools', 'read-agent-skill'),
     agentToolReadFile: path.join(LIB, 'agent', 'tools', 'read-file'),
     agentToolListFiles: path.join(LIB, 'agent', 'tools', 'list-files'),
     agentToolBrowserAction: path.join(LIB, 'agent', 'tools', 'browser-action'),
@@ -670,6 +673,9 @@ async function main() {
     agentSearchQuery: [
       'cleanExplicitSearchQuery', 'buildSearchQueries', 'isWuwaLatestRoleQuery', 'getSearchHostname', 'scoreSearchResult', 'isLowQualitySearchResult', 'sortSearchResults',
     ],
+    agentSearchResults: [
+      'normalizeResultUrl', 'normalizeSearchCandidate', 'isUsefulSearchResult', 'rankSearchCandidates', 'formatSearchResults', 'buildSearchFailureText',
+    ],
     agentQueue: [
       'enqueueAgentTask', 'getAgentQueueStats', 'clearAgentQueue', 'configureAgentQueue', 'resetAgentQueueForTests',
     ],
@@ -700,7 +706,7 @@ async function main() {
       'isAgentPathInside', 'getAgentPathAllowedRoots', 'assertExistingAgentPathInsideRoots', 'assertNewAgentPathInsideRoots', 'resolveAgentDefaultRoot',
     ],
     agentSkills: [
-      'listAgentSkills', 'parseFrontmatter', 'buildAgentSkillSummary', 'stripFrontmatter',
+      'listAgentSkills', 'findAgentSkill', 'readAgentSkill', 'parseFrontmatter', 'buildAgentSkillSummary', 'stripFrontmatter',
     ],
     agentSkillHub: [
       'listSkillHubItems', 'findSkillHubItem', 'setSkillHubEnabled', 'formatSkillHubItems',
@@ -723,6 +729,7 @@ async function main() {
     agentToolRegistry: [
       'getToolDefinitions', 'executeTool', 'getToolCount', 'getToolSummaries',
     ],
+    agentToolReadAgentSkill: ['execute'],
     agentToolMemoryTools: [],
     agentToolAppendFile: ['execute'],
     agentToolGrepSearch: ['execute'],
@@ -810,6 +817,7 @@ async function main() {
     path.join(LIB, 'agent', 'context.js'),
     path.join(LIB, 'agent', 'persona-context.js'),
     path.join(LIB, 'agent', 'search-query.js'),
+    path.join(LIB, 'agent', 'search-results.js'),
     path.join(LIB, 'agent', 'queue.js'),
     path.join(LIB, 'agent', 'memory.js'),
     path.join(LIB, 'agent', 'push.js'),
@@ -831,6 +839,7 @@ async function main() {
     path.join(LIB, 'agent', 'tools', 'get-time.js'),
     path.join(LIB, 'agent', 'tools', 'calculator.js'),
     path.join(LIB, 'agent', 'tools', 'web-search.js'),
+    path.join(LIB, 'agent', 'tools', 'read-agent-skill.js'),
     path.join(LIB, 'agent', 'tools', 'browser-action.js'),
     path.join(LIB, 'agent', 'tools', 'read-file.js'),
     path.join(LIB, 'agent', 'tools', 'list-files.js'),
@@ -853,7 +862,7 @@ async function main() {
     runSyntaxCheck(`node -c ${path.relative(ROOT, file)}`, file)
   }
 
-  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/persona-context.js', 'agent/search-query.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
+  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/persona-context.js', 'agent/search-query.js', 'agent/search-results.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/read-agent-skill.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
   const functions = []
   for (const file of duplicateScanFiles) {
     const src = read(path.join(LIB, file))
@@ -1184,6 +1193,7 @@ async function main() {
   check('agent qq exposes time tool', qqTools.includes('get_current_time'))
   check('agent qq exposes calculator tool', qqTools.includes('calculate'))
   check('agent qq web_search follows config', qqTools.includes('web_search') === modules.agentConfig.isToolEnabled('qq', 'web_search'))
+  check('agent qq exposes read_agent_skill', qqTools.includes('read_agent_skill'))
   check('agent qq does not expose file read', !qqTools.includes('read_file'))
   check('agent qq does not expose file list', !qqTools.includes('list_files'))
   check('agent qq does not expose file search', !qqTools.includes('find_files'))
@@ -1198,6 +1208,7 @@ async function main() {
   check('agent dashboard exposes edit file', dashboardTools.includes('edit_file'))
   check('agent dashboard exposes shell by default with confirm policy', dashboardTools.includes('execute_shell'))
   check('agent dashboard exposes browser action by default with confirm policy', dashboardTools.includes('browser_action'))
+  check('agent dashboard exposes read_agent_skill', dashboardTools.includes('read_agent_skill'))
   check('agent dashboard exposes grep search', dashboardTools.includes('grep_search'))
   check('agent dashboard exposes token usage', dashboardTools.includes('get_token_usage'))
   check('agent dashboard exposes log query', dashboardTools.includes('query_logs'))
@@ -1220,6 +1231,13 @@ async function main() {
   check('agent context compact summary preserves old tool result', compactedAgentMessages.some(item => item.role === 'system' && item.content.includes('older-tool-result')))
   check('agent context estimates cache hit rate', modules.agentContext.estimateCacheHitRate('abcdef', 'abcxyz') === 50)
   check('agent context summarizes old tool results', modules.agentContext.compactOldToolResults([{ role: 'tool', content: 'x'.repeat(2000) }, { role: 'tool', content: 'recent' }], 1)[0].content.includes('结果摘要'))
+  const rankedSearch = modules.agentSearchResults.rankSearchCandidates([
+    { title: '鸣潮角色立绘素材下载', url: 'https://699pic.com/mock', snippet: '素材 模板 图片下载' },
+    { title: '《鸣潮》官方公告 新共鸣者', url: 'https://wutheringwaves.kurogames.com/news/mock?utm_source=x', snippet: '官方公告 新角色 共鸣者' },
+  ], '鸣潮 最新角色')
+  check('agent search results filters low quality material sites', rankedSearch.length === 1 && rankedSearch[0].url.includes('wutheringwaves.kurogames.com'), JSON.stringify(rankedSearch))
+  const searchFailureText = modules.agentSearchResults.buildSearchFailureText('我的世界 最新版本', ['bing.com: 未提取到有效结果'])
+  check('agent search failure refuses body text fallback', searchFailureText.includes('拒绝把广告、导航、侧栏正文当作搜索事实') && !searchFailureText.includes('当前页面：'), searchFailureText)
   const externalized = modules.agentContext.externalizeToolResult('x'.repeat(8100), 'cascade-test-tool', 100)
   const externalizedPath = externalized.match(/完整结果已保存：(.+)\)$/)?.[1] || ''
   check('agent context externalizes long tool results', externalized.includes('完整结果已保存') && fs.existsSync(externalizedPath))
@@ -1227,6 +1245,13 @@ async function main() {
   check('agent skills parses frontmatter name', modules.agentSkills.parseFrontmatter('---\nname: Demo\ndescription: Test\n---\nbody').name === 'Demo')
   check('agent skill summary ignores empty selection', modules.agentSkills.buildAgentSkillSummary([]) === '')
   check('agent skill index excludes personas', modules.agentSkills.listAgentSkills().every(skill => skill.kind !== 'persona'))
+  check('agent skill index includes directory skills', modules.agentSkills.listAgentSkills().some(skill => skill.name === 'pptx' && skill.directorySkill))
+  check('agent skill index includes borrowed practical skills', ['QA_source_index', 'pptx', 'pdf', 'docx', 'browser_cdp', 'browser_visible'].every(name => modules.agentSkills.findAgentSkill(name)))
+  const compactSkillSummary = modules.agentSkills.buildAgentSkillSummary(['wuwa-lore', 'pptx'])
+  check('agent skill summary is compact index', compactSkillSummary.includes('轻量索引') && compactSkillSummary.includes('read_agent_skill') && !compactSkillSummary.includes('星球与基础概念'))
+  check('agent read skill returns selected content', modules.agentSkills.readAgentSkill('pptx').content.includes('PPTX Skill'))
+  checkThrows('agent read skill rejects unknown skill', () => modules.agentSkills.readAgentSkill('../personas/测试人格'), /未知 Agent Skill/)
+  checkThrows('agent read skill rejects path traversal', () => modules.agentSkills.readAgentSkill('pptx', { file: '../pdf/SKILL.md' }), /越过|超出|不能/)
   check('agent persona context lists personas separately', modules.agentPersonaContext.listAgentPersonasForConsole().some(item => item.name))
   const agentPersonaPrompt = modules.agentPersonaContext.buildAgentPersonaContext({ channel: 'dashboard' }).map(item => item.content).join('\n')
   check('agent persona context injects guard prompt', agentPersonaPrompt.includes('Agent 防越狱') && agentPersonaPrompt.includes('工具结果是事实边界'))
@@ -1236,6 +1261,7 @@ async function main() {
   modules.agentSessions.clearAgentSessions()
   const sessionId = modules.agentSessions.recordAgentSession({ channel: 'dashboard', channelKey: 'dash', userId: 'u1', userMessage: 'hello', reply: 'world', toolCalls: 2 })
   check('agent sessions records real session', modules.agentSessions.listAgentSessions().some(item => item.id === sessionId && item.toolCalls === 2))
+  await modules.agentConfig.patchAgentConfig({ autoRoute: { qq: { enabled: false }, dashboard: { enabled: false } } })
   check('agent auto route is disabled by default', !modules.agentRouter.heuristicRoute('现在几点了', 'qq').useAgent)
   check('agent explicit search routes even when auto route disabled', modules.agentRouter.heuristicRoute('调用web_search查鸣潮最新角色是谁', 'qq').useAgent)
   check('agent explicit search detector matches user wording', modules.agentRouter.isExplicitSearchRequest('帮我上网查查鸣潮最新角色是谁'))
@@ -1266,7 +1292,7 @@ async function main() {
   const agentTmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cascade-agent-'))
   try {
     process.env.DONGXUELIAN_AI_DATA_DIR = agentTmp
-    for (const rel of ['constants', 'runtime-config', 'agent/config', 'agent/path-guard', 'agent/tools/registry', 'agent/tools/read-file', 'agent/tools/list-files', 'agent/tools/find-files', 'agent/tools/write-file', 'agent/tools/edit-file', 'agent/tools/append-file', 'agent/tools/grep-search', 'agent/tools/execute-javascript', 'agent/tools/get-token-usage', 'agent/tools/set-user-timezone', 'agent/tools/query-logs', 'agent/tools/web-search', 'agent/tools/browser-action', 'agent/pending', 'agent/safety', 'agent/stats']) {
+    for (const rel of ['constants', 'runtime-config', 'agent/config', 'agent/path-guard', 'agent/skills', 'agent/tools/registry', 'agent/tools/read-agent-skill', 'agent/tools/read-file', 'agent/tools/list-files', 'agent/tools/find-files', 'agent/tools/write-file', 'agent/tools/edit-file', 'agent/tools/append-file', 'agent/tools/grep-search', 'agent/tools/execute-javascript', 'agent/tools/get-token-usage', 'agent/tools/set-user-timezone', 'agent/tools/query-logs', 'agent/tools/web-search', 'agent/tools/browser-action', 'agent/pending', 'agent/safety', 'agent/stats']) {
       delete require.cache[require.resolve(path.join(LIB, rel))]
     }
     const isolatedConstants = require(path.join(LIB, 'constants'))
@@ -1288,12 +1314,14 @@ async function main() {
     const isolatedGetTokenUsage = require(path.join(LIB, 'agent', 'tools', 'get-token-usage'))
     const isolatedSetUserTimezone = require(path.join(LIB, 'agent', 'tools', 'set-user-timezone'))
     const isolatedWebSearch = require(path.join(LIB, 'agent', 'tools', 'web-search'))
+    const isolatedReadAgentSkill = require(path.join(LIB, 'agent', 'tools', 'read-agent-skill'))
     const isolatedWriteFile = require(path.join(LIB, 'agent', 'tools', 'write-file'))
     const isolatedListFiles = require(path.join(LIB, 'agent', 'tools', 'list-files'))
     const isolatedEditFile = require(path.join(LIB, 'agent', 'tools', 'edit-file'))
     const isolatedSafety = require(path.join(LIB, 'agent', 'safety'))
     check('agent config default dangerous policy confirm', isolatedConfig.getDangerousPolicy() === 'confirm')
     check('agent config default qq web_search enabled', isolatedConfig.isToolEnabled('qq', 'web_search'))
+    check('agent config default qq read_agent_skill enabled', isolatedConfig.isToolEnabled('qq', 'read_agent_skill'))
     check('agent config default qq read_file disabled', !isolatedConfig.isToolEnabled('qq', 'read_file'))
     check('agent config default qq list_files disabled', !isolatedConfig.isToolEnabled('qq', 'list_files'))
     check('agent config default qq find_files disabled', !isolatedConfig.isToolEnabled('qq', 'find_files'))
@@ -1306,6 +1334,7 @@ async function main() {
     check('agent config default dashboard edit_file enabled', isolatedConfig.isToolEnabled('dashboard', 'edit_file'))
     check('agent config default dashboard shell enabled', isolatedConfig.isToolEnabled('dashboard', 'execute_shell'))
     check('agent config default dashboard browser enabled', isolatedConfig.isToolEnabled('dashboard', 'browser_action'))
+    check('agent config default dashboard read_agent_skill enabled', isolatedConfig.isToolEnabled('dashboard', 'read_agent_skill'))
     check('agent config default dashboard grep_search enabled', isolatedConfig.isToolEnabled('dashboard', 'grep_search'))
     check('agent config default dashboard token usage enabled', isolatedConfig.isToolEnabled('dashboard', 'get_token_usage'))
     check('agent config default dashboard query logs enabled', isolatedConfig.isToolEnabled('dashboard', 'query_logs'))
@@ -1315,6 +1344,18 @@ async function main() {
     check('agent config defaults dashboard persona empty', isolatedConfig.getAgentPersonaConfig().dashboardPersona === '')
     await isolatedConfig.patchAgentConfig({ enabledSkills: ['DemoSkill'] })
     check('agent config stores enabled skills', isolatedConfig.getEnabledSkills().includes('DemoSkill'))
+    fs.mkdirSync(path.join(agentTmp, 'ai-skills', 'docs', 'DemoSkill'), { recursive: true })
+    fs.writeFileSync(path.join(agentTmp, 'ai-skills', 'docs', 'DemoSkill', 'SKILL.md'), '---\nname: DemoSkill\ndescription: demo skill\n---\nDEMO_SKILL_BODY', 'utf8')
+    fs.writeFileSync(path.join(agentTmp, 'ai-skills', 'docs', 'DemoSkill', 'notes.md'), 'DEMO_REFERENCE_BODY', 'utf8')
+    check('read_agent_skill reads enabled skill body', (await isolatedReadAgentSkill.execute({ name: 'DemoSkill' })).includes('DEMO_SKILL_BODY'))
+    check('read_agent_skill reads enabled reference file', (await isolatedReadAgentSkill.execute({ name: 'DemoSkill', file: 'notes.md' })).includes('DEMO_REFERENCE_BODY'))
+    await isolatedConfig.patchAgentConfig({ enabledSkills: [] })
+    try {
+      await isolatedReadAgentSkill.execute({ name: 'DemoSkill' })
+      fail('read_agent_skill rejects disabled skill', 'disabled skill was read')
+    } catch (error) {
+      check('read_agent_skill rejects disabled skill', /未启用/.test(String(error && error.message || error)))
+    }
     await isolatedConfig.patchAgentConfig({ persona: { dashboardPersona: '测试人格', qqInheritChatPersona: false } })
     check('agent config stores persona settings', isolatedConfig.getAgentPersonaConfig().dashboardPersona === '测试人格' && isolatedConfig.getAgentPersonaConfig().qqInheritChatPersona === false)
     const writeRoot = path.join(agentTmp, 'workspace')
@@ -1573,7 +1614,7 @@ async function main() {
   const dashboardAppSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'frontend', 'src', 'App.vue'))
   const dashboardAgentPanelSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'frontend', 'src', 'components', 'AgentPanel.vue'))
   check('dashboard sidebar includes agent panel tab', dashboardAppSrc.includes("id: 'agent'") && dashboardAppSrc.includes('AgentPanel'))
-  check('dashboard agent panel manages tools and skills', dashboardAgentPanelSrc.includes('fetchAgentConfig') && dashboardAgentPanelSrc.includes('Skill 索引'))
+  check('dashboard agent panel manages tools and skills', dashboardAgentPanelSrc.includes('fetchAgentConfig') && dashboardAgentPanelSrc.includes('Skill 索引') && dashboardAgentPanelSrc.includes('read_agent_skill'))
   check('dashboard agent panel exposes skill selection', dashboardAgentPanelSrc.includes('config.enabledSkills') && dashboardAgentPanelSrc.includes(':value="skill.name"'))
   check('dashboard agent panel exposes read roots', dashboardAgentPanelSrc.includes('文件读取根目录') && dashboardAgentPanelSrc.includes('config.readFileRoots'))
   check('dashboard agent panel stores local chat history', dashboardAgentPanelSrc.includes('dashboard_agent_history') && dashboardAgentPanelSrc.includes('history.value'))
@@ -1585,6 +1626,7 @@ async function main() {
   const agentConsoleSrc = fs.existsSync(path.join(PKG_ROOT, 'agent-console', 'src', 'main.tsx')) ? read(path.join(PKG_ROOT, 'agent-console', 'src', 'main.tsx')) : ''
   check('agent console exposes runtime config page', agentConsoleSrc.includes("id: 'runtime'") && agentConsoleSrc.includes('function RuntimePage') && agentConsoleSrc.includes('queue.maxGlobal'))
   check('agent console exposes persona page separate from skills', agentConsoleSrc.includes("id: 'personas'") && agentConsoleSrc.includes('function PersonasPage') && agentConsoleSrc.includes('api.savePersona'))
+  check('agent console can enable skills from skill page', agentConsoleSrc.includes('function SkillsPage') && agentConsoleSrc.includes('next.enabledSkills') && agentConsoleSrc.includes('注入轻量索引'))
   check('dashboard exposes deterministic plan action APIs', dashboardStandalone.includes("/dashboard/api/agent/plans") && dashboardStandalone.includes("/resume") && dashboardStandalone.includes("/abandon") && dashboardStandalone.includes("plan', 'plan-runner"))
   check('dashboard plan create obeys plan mode switch', dashboardStandalone.includes("agent', 'config") && dashboardStandalone.includes('agentConfig.planMode?.enabled') && dashboardStandalone.includes('计划模式当前未开启'))
   check('agent console exposes plan actions', agentConsoleSrc.includes('function PlansPage') && agentConsoleSrc.includes('api.createPlan') && agentConsoleSrc.includes('api.resumePlan') && agentConsoleSrc.includes('api.abandonPlan'))
@@ -1630,8 +1672,8 @@ async function main() {
   for (const dataDirName of ['conversations', 'user-profiles', 'ai-event-dumps', 'political-handlers']) {
     check(`setup.sh creates ${dataDirName}`, setupSrc.includes(dataDirName))
   }
-  for (const skillPart of ['core', 'personas', 'modes', 'lore']) {
-    check(`setup.sh copies ai-skills ${skillPart}`, setupSrc.includes('for skill_part in core personas modes lore') || setupSrc.includes(`ai-skills/${skillPart}`))
+  for (const skillPart of ['core', 'personas', 'modes', 'lore', 'docs']) {
+    check(`setup.sh copies ai-skills ${skillPart}`, setupSrc.includes(`for skill_part in core personas modes lore docs`) || setupSrc.includes(`ai-skills/${skillPart}`))
   }
   check('setup.sh does not contain stale AI version', !setupSrc.includes('0.3.11'))
   check('setup.sh does not write package files directly into node_modules', !setupSrc.includes('cat > /root/koishi-app/node_modules'))

@@ -297,19 +297,39 @@ function ToolsPage({ data, setConfig, refresh }: any) {
   )
 }
 
-function SkillsPage({ skills }: { skills: any[] }) {
+function SkillsPage({ data, setConfig, refresh }: any) {
+  const config = data.config?.config
+  const skills = data.config?.skills || []
+  async function toggle(skillName: string, enabled: boolean) {
+    const next = structuredClone(config)
+    const current = new Set(Array.isArray(next.enabledSkills) ? next.enabledSkills : [])
+    if (enabled) current.add(skillName)
+    else current.delete(skillName)
+    next.enabledSkills = Array.from(current)
+    setConfig({ ...data.config, config: next })
+    await api.saveConfig({ config: next, mode: data.config?.mode })
+    refresh()
+  }
   return (
     <section className="panel">
-      <h2>技能</h2>
+      <div className="section-head">
+        <h2>技能</h2>
+        <span>{skills.length} 个实用 Skill</span>
+      </div>
       <div className="card-grid">
         {(skills || []).map(skill => (
           <article className="skill-card" key={skill.name}>
             <h3>{skill.name}</h3>
             <p>{skill.description || '无描述'}</p>
             <div className="tags">
-              <span className={skill.enabled ? 'tag ok' : 'tag'}>{skill.enabled ? '已启用' : '已禁用'}</span>
+              <span className={config?.enabledSkills?.includes(skill.name) ? 'tag ok' : 'tag'}>{config?.enabledSkills?.includes(skill.name) ? '已启用' : '已禁用'}</span>
               <span className="tag">{skill.kind || 'skill'}</span>
+              {skill.references?.length > 0 && <span className="tag">参考 {skill.references.length}</span>}
             </div>
+            <label className="switch-row">
+              <input type="checkbox" checked={!!config?.enabledSkills?.includes(skill.name)} onChange={event => toggle(skill.name, event.target.checked)} />
+              <span>注入轻量索引，允许 Agent 按需读取</span>
+            </label>
           </article>
         ))}
       </div>
@@ -682,7 +702,7 @@ function App() {
         {active === 'inbox' && <InboxPage pending={data.pending} pushLog={data.pushLog} refresh={data.refresh} />}
         {active === 'personas' && <PersonasPage personas={data.personas} persona={data.persona} setPersona={data.setPersona} refresh={data.refresh} />}
         {active === 'files' && <FilesPage roots={data.config?.effectiveReadRoots || []} />}
-        {active === 'skills' && <SkillsPage skills={data.config?.skills || []} />}
+        {active === 'skills' && <SkillsPage data={data} setConfig={data.setConfig} refresh={data.refresh} />}
         {active === 'tools' && <ToolsPage data={data} setConfig={data.setConfig} refresh={data.refresh} />}
         {active === 'plans' && <PlansPage plans={data.plans} refresh={data.refresh} />}
         {active === 'cron' && <CronPage crons={data.crons} history={data.cronHistory} refresh={data.refresh} />}

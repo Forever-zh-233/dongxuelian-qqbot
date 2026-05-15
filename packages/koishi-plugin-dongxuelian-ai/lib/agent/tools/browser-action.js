@@ -5,7 +5,7 @@ const dns = require('dns/promises')
 const net = require('net')
 const { DATA_DIR } = require('../../constants')
 const { assertExistingAgentPathInsideRoots } = require('../path-guard')
-const { sortSearchResults, isLowQualitySearchResult } = require('../search-query')
+const { rankSearchCandidates, formatSearchResults, buildSearchFailureText } = require('../search-results')
 
 let browser = null
 let page = null
@@ -229,88 +229,60 @@ async function typeSelector(selector, text) {
   return `已输入到：${value}`
 }
 
-function getQueryTerms(query = '') {
-  return String(query || '')
-    .split(/[\s,，。；;、]+/)
-    .map(item => item.trim())
-    .filter(item => item.length >= 2)
-    .slice(0, 6)
-}
-
-function hasQuerySignal(item = {}, query = '') {
-  const terms = getQueryTerms(query)
-  if (!terms.length) return true
-  const haystack = `${item.title || ''}\n${item.snippet || ''}\n${item.text || ''}\n${item.url || ''}`.toLowerCase()
-  return terms.some(term => haystack.includes(term.toLowerCase()))
-}
-
-function isUsefulSearchResult(item = {}, query = '') {
-  const title = String(item.title || '').trim()
-  const url = String(item.url || '').trim()
-  if (!title || !url) return false
-  if (/^(全部|搜索|图片|视频|地图|资讯|更多|工具|时间不限|Any time|Tools|WEB|IMAGES|VIDEOS|MAPS)$/i.test(title)) return false
-  if (/某些结果已被删除|Skip to content|Accessibility Feedback|辅助功能反馈|跳至内容/.test(title)) return false
-  if (/javascript:|\/search\?|\/images\/search|\/videos\/search|go\.microsoft\.com\/fwlink/i.test(url)) return false
-  if (isLowQualitySearchResult(item)) return false
-  return hasQuerySignal(item, query)
-}
-
 async function extractSearchResults(query) {
   const p = await ensurePage()
-  const results = await p.evaluate(() => {
+  const candidates = await p.evaluate(() => {
+    function cleanText(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim()
+    }
+    function pickSnippet(item, titleText) {
+      const snippetEl = item.querySelector('.b_caption p, .b_snippet, .result__snippet, .c-abstract, .content-right_8Zs40, .compText, .snippet, p')
+      const snippet = cleanText(snippetEl && snippetEl.innerText)
+      if (snippet) return snippet
+      return cleanText(item.innerText).replace(titleText, '').trim().slice(0, 420)
+    }
     const selectors = [
       '#b_results li.b_algo',
+      '#b_results .b_algo',
       '.result',
       '.result__body',
+      '.web-result',
       '.c-container',
-      '[tpl]'
+      '.result-op',
+      '[tpl]',
+      '[data-testid="result"]',
+      'article',
     ]
     const items = Array.from(document.querySelectorAll(selectors.join(',')))
-    return items.map(item => {
+    const fromContainers = items.map(item => {
       const links = Array.from(item.querySelectorAll('a[href]')).filter(a => {
         const text = (a.innerText || '').trim()
         const href = String(a.href || '')
         return text && href && !href.startsWith('javascript:')
       })
       const titleEl = item.querySelector('h2 a, h3 a, .result__a, .t a') || links.find(a => (a.innerText || '').trim().length > 8) || links[0]
+      const title = cleanText(titleEl && titleEl.innerText)
       const snippetEl = item.querySelector('.b_caption p, .b_snippet, .result__snippet, .c-abstract, .content-right_8Zs40, p')
       return {
-        title: (titleEl && titleEl.innerText || '').trim(),
+        title,
         url: (titleEl && titleEl.href || '').trim(),
-        snippet: (snippetEl && snippetEl.innerText || '').trim(),
-        text: (item.innerText || '').trim(),
+        snippet: cleanText(snippetEl && snippetEl.innerText) || pickSnippet(item, title),
+        text: cleanText(item.innerText),
       }
-    }).filter(item => item.title && item.url).slice(0, 12)
+    })
+    const fromLinks = Array.from(document.querySelectorAll('a[href]')).map(a => {
+      const title = cleanText(a.innerText || a.getAttribute('aria-label') || a.getAttribute('title'))
+      const container = a.closest('li, article, .result, .result__body, .web-result, .c-container, .result-op, [tpl], [data-testid="result"], div')
+      return {
+        title,
+        url: String(a.href || '').trim(),
+        snippet: container ? pickSnippet(container, title) : '',
+        text: container ? cleanText(container.innerText) : title,
+      }
+    })
+    return fromContainers.concat(fromLinks).filter(item => item.title && item.url).slice(0, 80)
   }).catch(() => [])
-  const seen = new Set()
-  const useful = []
-  for (const item of results) {
-    if (!isUsefulSearchResult(item, query)) continue
-    const key = String(item.url || item.title).replace(/[?&]rut=[^&]+/g, '')
-    if (seen.has(key)) continue
-    seen.add(key)
-    useful.push(item)
-  }
-  const ranked = sortSearchResults(useful, query).slice(0, 8)
-  if (ranked.length) {
-    const lines = ranked.map((item, index) => `${index + 1}. ${item.title}\n   ${item.url}\n   可信度分：${item.score}\n   ${item.snippet || item.text.slice(0, 240) || '(无摘要)'}`)
-    return `已搜索：${query}\n搜索结果：\n${lines.join('\n')}`
-  }
-  return ''
-}
-
-function extractUsefulPageText(text = '') {
-  const lines = String(text || '')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-  const filtered = lines.filter(line => {
-    if (/^(百度一下|百度首页|设置|登录|网页|图片|资讯|视频|地图|贴吧|文库|更多|搜索工具|热搜榜|Privacy|Terms|All Regions|Any Time)$/i.test(line)) return false
-    if (/习近平|特朗普|热搜|咨询热线|想在此推广/.test(line)) return false
-    return line.length > 6
-  })
-  return filtered.slice(0, 80).join('\n').slice(0, 6000)
+  return formatSearchResults(query, rankSearchCandidates(candidates, query))
 }
 
 async function searchAndRead(query) {
@@ -320,26 +292,22 @@ async function searchAndRead(query) {
   const urls = [
     'https://www.bing.com/search?q=' + encodeURIComponent(value),
     'https://duckduckgo.com/html/?q=' + encodeURIComponent(value),
-    'https://www.baidu.com/s?wd=' + encodeURIComponent(value),
   ]
   const failures = []
   for (const searchUrl of urls) {
     try {
       const targetUrl = await validateUrl(searchUrl)
-      await p.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 })
+      await p.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 })
       currentUrl = p.url()
-      await p.waitForSelector('#b_results li.b_algo, .result, .result__body, .c-container, [tpl]', { timeout: 8000 }).catch(() => {})
+      await p.waitForSelector('#b_results li.b_algo, .result, .result__body, .web-result, .c-container, [tpl], a[href]', { timeout: 8000 }).catch(() => {})
       const extracted = await extractSearchResults(value)
       if (extracted) return extracted
-      const bodyText = await p.evaluate(() => document.body ? document.body.innerText : '').catch(() => '')
-      const usefulText = extractUsefulPageText(bodyText)
-      if (usefulText && usefulText.length > 120) return `已搜索：${value}\n当前页面：${currentUrl}\n文本：\n${usefulText}`
       failures.push(`${new URL(searchUrl).hostname}: 未提取到有效结果`)
     } catch (e) {
       failures.push(`${searchUrl}: ${e.message}`)
     }
   }
-  return `已搜索：${value}\n未提取到有效搜索结果。${failures.length ? '\n' + failures.join('\n') : ''}`
+  return buildSearchFailureText(value, failures)
 }
 
 async function waitForTarget(selector, timeoutMs) {

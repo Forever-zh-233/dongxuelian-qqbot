@@ -7,6 +7,7 @@
 const getTimeTool = require('./get-time')
 const calculatorTool = require('./calculator')
 const webSearchTool = require('./web-search')
+const readAgentSkillTool = require('./read-agent-skill')
 const readFileTool = require('./read-file')
 const listFilesTool = require('./list-files')
 const findFilesTool = require('./find-files')
@@ -25,7 +26,7 @@ const planTools = require('../plan/plan-tools')
 const memoryTools = require('./memory-tools')
 const { getAgentConfig } = require('../config')
 
-const tools = [getTimeTool, calculatorTool, webSearchTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool, ...planTools.tools, ...memoryTools.tools]
+const tools = [getTimeTool, calculatorTool, webSearchTool, readAgentSkillTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool, ...planTools.tools, ...memoryTools.tools]
 
 const TOOL_TIMEOUT_MS = 90000
 

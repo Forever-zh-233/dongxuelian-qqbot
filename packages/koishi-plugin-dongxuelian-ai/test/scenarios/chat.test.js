@@ -156,6 +156,72 @@ async function run(t) {
     waitFor: message => String(message).includes('agent-persona-ok'),
   })
 
+  await runChatCase(t, 'QQ Agent personal persona overrides group persona', [
+    { json: { choices: [{ message: { content: 'agent-personal-persona-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario QQ Agent personal persona reply', result, 'agent-personal-persona-ok')
+    const prompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario QQ Agent prompt includes personal persona', prompt.includes('AMIS_AGENT_MARKER') && prompt.includes('当前人格：爱弥斯') && prompt.includes('来源：用户人格'), prompt)
+    t.check('scenario QQ Agent prompt excludes group persona marker', !prompt.includes('CHANG_LI_AGENT_MARKER') && !prompt.includes('当前人格：长离'), prompt)
+    t.check('scenario QQ Agent base system does not force Dongxuelian over selected persona', prompt.includes('具体人格由后续【Agent 人格同步】system 消息决定') && !prompt.includes('你是东雪莲，一个带有 Agent 能力'), prompt)
+  }, {
+    input: '莲莲 agent 帮我查一下当前设置',
+    setup(session, { data }) {
+      data.writeText('ai-skills/personas/SKILL.amis.md', [
+        '---',
+        'name: 爱弥斯',
+        'description: personal persona test',
+        '---',
+        'AMIS_AGENT_MARKER',
+      ].join('\n'))
+      data.writeText('ai-skills/personas/SKILL.changli.md', [
+        '---',
+        'name: 长离',
+        'description: group persona test',
+        '---',
+        'CHANG_LI_AGENT_MARKER',
+      ].join('\n'))
+      data.writeJson('ai-persona-users.json', { [session.userId]: '爱弥斯' })
+      data.writeJson('ai-persona-groups.json', { [session.guildId]: { persona: '长离' } })
+      const persona = require(path.join(AI_ROOT, 'lib', 'persona.js'))
+      persona.loadPersonaUsers()
+      persona.loadPersonaGroups()
+    },
+    waitFor: message => String(message).includes('agent-personal-persona-ok'),
+  })
+
+  await runChatCase(t, 'QQ Agent skill prompt uses compact index', [
+    { json: { choices: [{ message: { content: 'agent-skill-index-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario QQ Agent compact skill prompt reply', result, 'agent-skill-index-ok')
+    const prompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario QQ Agent prompt includes compact skill index', prompt.includes('轻量索引') && prompt.includes('read_agent_skill'), prompt)
+    t.check('scenario QQ Agent prompt does not inject full skill body', !prompt.includes('LONG_SKILL_BODY_SHOULD_NOT_BE_IN_PROMPT'), prompt)
+    t.check('scenario QQ Agent exposes read_agent_skill but not read_file', calls[0].requestBody.tools.some(item => item.function?.name === 'read_agent_skill') && !calls[0].requestBody.tools.some(item => item.function?.name === 'read_file'), JSON.stringify(calls[0].requestBody.tools))
+  }, {
+    input: '莲莲 agent 按 pptx 技能做个方案',
+    setup(session, { data }) {
+      data.writeText('ai-skills/docs/pptx/SKILL.md', [
+        '---',
+        'name: pptx',
+        'description: compact prompt test',
+        '---',
+        'LONG_SKILL_BODY_SHOULD_NOT_BE_IN_PROMPT',
+      ].join('\n'))
+      data.writeJson('ai-tool-config.json', {
+        channels: {
+          qq: { enabled: true, tools: { get_current_time: true, calculate: true, web_search: true, read_agent_skill: true } },
+          dashboard: { enabled: true, tools: {} },
+        },
+        autoRoute: { qq: { enabled: false }, dashboard: { enabled: false } },
+        dangerousPolicy: 'confirm',
+        enabledSkills: ['pptx'],
+        readFileRoots: [],
+      })
+    },
+    waitFor: message => String(message).includes('agent-skill-index-ok'),
+  })
+
   await runChatCase(t, 'reasoning-only fallback', [
     { json: { choices: [{ message: { content: '', reasoning_content: 'reasoning-secret' } }] } },
     { json: { choices: [{ message: { content: 'fallback-visible' } }] } },

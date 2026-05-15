@@ -81,6 +81,10 @@ async function run(t) {
     checkSentNonEmpty(t, 'scenario qq high-risk tool switch replies', blockedQqShell)
     t.check('scenario qq shell switch stays disabled', data.readJson('ai-tool-config.json').channels.qq.tools.execute_shell === false)
 
+    const qqSkillReader = await run(makeSession({ content: '\u5de5\u5177\u5f00\u5173 qq read_agent_skill \u5f00' }))
+    checkSentNonEmpty(t, 'scenario qq read_agent_skill switch accepted', qqSkillReader)
+    t.check('scenario qq read_agent_skill switch writes enabled tool', data.readJson('ai-tool-config.json').channels.qq.tools.read_agent_skill === true)
+
     const agentSkillList = await run(makeSession({ content: '\u5de5\u5177Skill \u5217\u8868' }))
     checkSentNonEmpty(t, 'scenario agent skill list replies', agentSkillList)
     t.check('scenario agent skill list excludes fixture persona', !agentSkillList.sent.join('\n').includes('\u6d4b\u8bd5\u4eba\u683c'), JSON.stringify(agentSkillList.sent))

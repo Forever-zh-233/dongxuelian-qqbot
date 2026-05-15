@@ -74,7 +74,7 @@
 
     <div class="section-head">
       <h3>Skill 索引</h3>
-      <span class="muted">只读预览 {{ skills.length }} 个</span>
+      <span class="muted">轻量索引 {{ skills.length }} 个 · 正文由 read_agent_skill 按需读取</span>
     </div>
     <div class="skill-list">
       <label v-for="skill in skills" :key="skill.file" class="skill-row">
