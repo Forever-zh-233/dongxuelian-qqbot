@@ -463,7 +463,7 @@ async function chat(session, userText, ctx, options = {}) {
   }
 
   // 输入层越狱拦截：检测到 prompt injection 走专用嘲讽模型，不走正常 chat 流程
-  if (!personaName && isJailbreakAttempt(cleanInput)) {
+  if (isJailbreakAttempt(cleanInput)) {
     ctx.logger('dongxuelian-ai').warn(`jailbreak attempt detected, blocking. input: ${cleanInput.slice(0, 80)}`)
     const jailbreakReply = await chatJailbreak(session, cleanInput, ctx)
     saveConversationTurn(session, currentUserMessage, jailbreakReply)

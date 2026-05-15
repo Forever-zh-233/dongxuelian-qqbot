@@ -71,5 +71,5 @@ module.exports = {
     })
   },
   dangerous: true,
-  defaultChannels: [],
+  defaultChannels: ['dashboard'],
 }

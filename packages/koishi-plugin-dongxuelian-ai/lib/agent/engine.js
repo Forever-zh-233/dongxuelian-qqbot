@@ -14,6 +14,7 @@ const pending = require('./pending')
 const { isChannelEnabled, getEnabledSkills } = require('./config')
 const { buildAgentSkillSummary } = require('./skills')
 const { buildAgentMessages } = require('./messages')
+const { buildAgentPersonaContext, mergeAgentSystemExtra } = require('./persona-context')
 const { recordAgentSession } = require('./sessions')
 const { MAX_TOOL_ROUNDS } = require('../constants')
 
@@ -178,7 +179,9 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
   const allowedToolNames = new Set(tools.map(item => item.function && item.function.name).filter(Boolean))
   const config = await loadConfig()
   const skillSummary = buildAgentSkillSummary(getEnabledSkills())
-  const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: skillSummary ? [...systemExtra, { role: 'system', content: skillSummary }] : systemExtra, history })
+  const personaExtra = buildAgentPersonaContext({ channel, channelKey, userId })
+  const allSystemExtra = mergeAgentSystemExtra(personaExtra, systemExtra, skillSummary ? [{ role: 'system', content: skillSummary }] : [])
+  const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: allSystemExtra, history })
   for (const item of Array.isArray(preExecuteTools) ? preExecuteTools : []) {
     if (!item || !item.name) continue
     if (forceToolSet.has(item.name)) allowedToolNames.add(item.name)

@@ -31,6 +31,9 @@ const {
   formatPercent, getModelDisplayName, getSearchCapability, formatSearchStatus,
   extractAtIds, todayCst, todayCstMinusDays,
   sanitizeUserName,
+  sanitizeUserInput,
+  isJailbreakAttempt,
+  pickJailbreakFallbackReply,
 } = require('./utils')
 const { logDebug } = require('./logging-config')
 
@@ -739,6 +742,9 @@ async function handleCommand(session, ctx, state) {
   if (toolSwitchMatch) {
     if (!hasAdminPermission(session)) return handled('只有管理员能操作此命令。')
     const [, channel, toolName, rawEnabled] = toolSwitchMatch
+    if (channel === 'qq' && /^(?:execute_shell|read_file|list_files|find_files|write_file|edit_file|append_file|grep_search|execute_javascript|browser_action|query_logs)$/i.test(toolName)) {
+      return handled('QQ Agent 不允许开启服务器/文件/浏览器高权限工具；请在 Agent Console 使用 Dashboard Agent，并通过审批执行危险操作。')
+    }
     const enabled = /^(?:开|on)$/i.test(rawEnabled)
     const registry = require('./agent/tools/registry')
     if (!registry.toolRegistry[toolName]) return handled(`未知工具：${toolName}`)
@@ -939,6 +945,7 @@ async function handleCommand(session, ctx, state) {
   const agentMatch = plain.match(/^莲莲\s*(?:工具|agent)\s+(.+)/i)
   if (agentMatch && !adminCommandMatched) {
     const query = agentMatch[1].trim()
+    if (isJailbreakAttempt(sanitizeUserInput(query))) return handled(pickJailbreakFallbackReply())
     const engine = require('./agent/engine')
     const agentConfig = require('./agent/config').getAgentConfig()
     const agentQueue = require('./agent/queue')

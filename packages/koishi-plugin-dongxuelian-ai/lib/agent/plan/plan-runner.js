@@ -28,7 +28,7 @@ async function resolvePlan(planId = '', filters = {}) {
   return matched || active[0] || null
 }
 
-async function resumePlan({ planId = '', channelKey, userId, userName = '', bot } = {}) {
+async function resumePlan({ planId = '', channelKey, userId, userName = '', channel = '', bot } = {}) {
   const plan = await resolvePlan(planId)
   if (!plan) throw new Error('当前没有可继续的执行中计划。')
   if (!['executing', 'todo'].includes(plan.state)) throw new Error('该计划已结束，不能继续执行。')
@@ -46,7 +46,7 @@ async function resumePlan({ planId = '', channelKey, userId, userName = '', bot 
       userName: userName || plan.userName || 'Plan',
       userId: userId || plan.userId,
       channelKey: channelKey || plan.channelKey,
-      channel: plan.channel === 'dashboard' ? 'dashboard' : 'qq',
+      channel: channel === 'dashboard' || plan.channel === 'dashboard' ? 'dashboard' : 'qq',
       bot,
       systemExtra: [
         { role: 'system', content: planPrompts.buildPlanSystemPrompt(plan) },

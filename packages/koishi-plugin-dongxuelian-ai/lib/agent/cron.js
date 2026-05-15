@@ -175,7 +175,7 @@ async function runCronNow(id) {
           userName: 'Cron',
           userId: cron.createdBy || cron.id,
           channelKey: cron.targetChannel || 'cron',
-          channel: 'qq',
+          channel: cron.targetChannel === 'dashboard' ? 'dashboard' : 'qq',
         }),
       })
       const push = require('./push')

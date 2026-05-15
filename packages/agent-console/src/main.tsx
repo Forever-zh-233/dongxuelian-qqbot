@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { api, setAccessToken, setAdminToken, verifyAdmin } from './api/client'
 import './styles.css'
 
-type TabId = 'chat' | 'inbox' | 'files' | 'skills' | 'tools' | 'plans' | 'cron' | 'stats' | 'runtime' | 'model' | 'env' | 'security'
+type TabId = 'chat' | 'inbox' | 'personas' | 'files' | 'skills' | 'tools' | 'plans' | 'cron' | 'stats' | 'runtime' | 'model' | 'env' | 'security'
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system'
@@ -16,6 +16,7 @@ const tabs: Array<{ id: TabId; label: string; group: string }> = [
   { id: 'inbox', label: '收件箱', group: '主功能' },
   { id: 'plans', label: '计划', group: '控制' },
   { id: 'cron', label: '定时任务', group: '控制' },
+  { id: 'personas', label: '人格', group: '工作区' },
   { id: 'files', label: '文件', group: '工作区' },
   { id: 'skills', label: '技能', group: '工作区' },
   { id: 'tools', label: '工具', group: '工作区' },
@@ -39,12 +40,14 @@ function useAgentData() {
   const [cronHistory, setCronHistory] = useState<any[]>([])
   const [pushLog, setPushLog] = useState<any[]>([])
   const [env, setEnv] = useState<any>(null)
+  const [personas, setPersonas] = useState<any[]>([])
+  const [persona, setPersona] = useState<any>(null)
   const [error, setError] = useState('')
 
   async function refresh() {
     setLoading(true)
     setError('')
-    const [cfg, pnd, ses, sta, que, guard, planRes, cronRes, pushRes, envRes] = await Promise.all([
+    const [cfg, pnd, ses, sta, que, guard, planRes, cronRes, pushRes, envRes, personaRes] = await Promise.all([
       api.getConfig(),
       api.pending(),
       api.sessions(),
@@ -55,6 +58,7 @@ function useAgentData() {
       api.crons(),
       api.pushLog(),
       api.env(),
+      api.personas(),
     ])
     if (cfg.ok) setConfig(cfg.data)
     else setError(cfg.message || cfg.data?.message || '加载 Agent 配置失败')
@@ -70,11 +74,18 @@ function useAgentData() {
     }
     if (pushRes.ok) setPushLog(pushRes.data?.log || [])
     if (envRes.ok) setEnv(envRes.data)
+    if (personaRes.ok) {
+      setPersonas(personaRes.data?.personas || [])
+      setPersona(personaRes.data?.persona || null)
+    } else if (cfg.ok) {
+      setPersonas(cfg.data?.personas || [])
+      setPersona(cfg.data?.config?.persona || null)
+    }
     setLoading(false)
   }
 
   useEffect(() => { refresh() }, [])
-  return { loading, config, setConfig, pending, sessions, stats, queue, shellGuard, plans, crons, cronHistory, pushLog, env, error, refresh }
+  return { loading, config, setConfig, pending, sessions, stats, queue, shellGuard, plans, crons, cronHistory, pushLog, env, personas, persona, setPersona, error, refresh }
 }
 
 function AdminGate({ onVerified }: { onVerified: () => void }) {
@@ -118,7 +129,7 @@ function Sidebar({ active, setActive, version }: { active: TabId; setActive: (id
           <span>v{version || '1.1.5'}</span>
         </div>
       </div>
-      <div className="agent-select">默认智能体</div>
+      <div className="agent-select">当前智能体人格可在“人格”页切换</div>
       {groups.map(group => (
         <nav key={group} className="nav-group" aria-label={group}>
           <p>{group}</p>
@@ -299,6 +310,53 @@ function SkillsPage({ skills }: { skills: any[] }) {
               <span className={skill.enabled ? 'tag ok' : 'tag'}>{skill.enabled ? '已启用' : '已禁用'}</span>
               <span className="tag">{skill.kind || 'skill'}</span>
             </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function PersonasPage({ personas, persona, setPersona, refresh }: { personas: any[]; persona: any; setPersona: (value: any) => void; refresh: () => void }) {
+  const current = persona?.dashboardPersona || ''
+  const inherit = persona?.qqInheritChatPersona !== false
+  const [message, setMessage] = useState('')
+  async function save(nextName: string, nextInherit = inherit) {
+    const result = await api.savePersona({ dashboardPersona: nextName, qqInheritChatPersona: nextInherit })
+    if (result.ok) {
+      setPersona(result.data?.persona || { dashboardPersona: nextName, qqInheritChatPersona: nextInherit })
+      setMessage('人格已更新')
+      refresh()
+    } else {
+      setMessage(result.message || result.data?.message || '人格更新失败')
+    }
+  }
+  return (
+    <section className="panel">
+      <div className="section-head">
+        <h2>人格</h2>
+        <span>{current || '默认（东雪莲）'}</span>
+      </div>
+      <div className="setting-grid">
+        <label>
+          <span>QQ 继承聊天人格</span>
+          <input type="checkbox" checked={inherit} onChange={e => save(current, e.target.checked)} />
+        </label>
+      </div>
+      <div className="row-actions">
+        <button className={!current ? 'active' : ''} onClick={() => save('')}>默认人格</button>
+      </div>
+      {message && <span className="form-error">{message}</span>}
+      <div className="card-grid">
+        {(personas || []).map(item => (
+          <article className={'skill-card persona-card ' + (current === item.name ? 'selected' : '')} key={item.name}>
+            <h3>{item.name}</h3>
+            <p>{item.description || '无描述'}</p>
+            <div className="tags">
+              {item.lore && <span className="tag">{item.lore}</span>}
+              <span className={current === item.name ? 'tag ok' : 'tag'}>{current === item.name ? 'Console 使用中' : '可选'}</span>
+            </div>
+            <button onClick={() => save(item.name)} disabled={current === item.name}>设为 Console 人格</button>
           </article>
         ))}
       </div>
@@ -622,6 +680,7 @@ function App() {
         {data.error && <div className="error-banner">{data.error}</div>}
         {active === 'chat' && <ChatPage refresh={data.refresh} />}
         {active === 'inbox' && <InboxPage pending={data.pending} pushLog={data.pushLog} refresh={data.refresh} />}
+        {active === 'personas' && <PersonasPage personas={data.personas} persona={data.persona} setPersona={data.setPersona} refresh={data.refresh} />}
         {active === 'files' && <FilesPage roots={data.config?.effectiveReadRoots || []} />}
         {active === 'skills' && <SkillsPage skills={data.config?.skills || []} />}
         {active === 'tools' && <ToolsPage data={data} setConfig={data.setConfig} refresh={data.refresh} />}

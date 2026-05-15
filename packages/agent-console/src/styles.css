@@ -40,6 +40,7 @@ button:disabled {
 }
 
 button.secondary,
+button.active,
 .top-actions a,
 .download-link {
   background: #f3f4f6;
@@ -354,6 +355,7 @@ pre {
 
 .tool-card,
 .skill-card,
+.persona-card,
 .plan-card,
 .approval-card {
   border: 1px solid #e5e7eb;
@@ -362,6 +364,11 @@ pre {
   background: #fbfbfc;
   display: grid;
   gap: 10px;
+}
+
+.persona-card.selected {
+  border-color: #f97316;
+  background: #fff7ed;
 }
 
 .tool-icon {

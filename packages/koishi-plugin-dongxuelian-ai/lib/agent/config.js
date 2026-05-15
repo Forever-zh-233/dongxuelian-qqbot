@@ -55,8 +55,8 @@ const DEFAULT_CONFIG = Object.freeze({
         find_files: true,
         write_file: true,
         edit_file: true,
-        execute_shell: false,
-        browser_action: false,
+        execute_shell: true,
+        browser_action: true,
         append_file: true,
         grep_search: true,
         execute_javascript: true,
@@ -82,6 +82,10 @@ const DEFAULT_CONFIG = Object.freeze({
     dashboard: { enabled: false },
   },
   enabledSkills: [],
+  persona: {
+    dashboardPersona: '',
+    qqInheritChatPersona: true,
+  },
   readFileRoots: [],
   queue: {
     maxGlobal: 3,
@@ -116,6 +120,7 @@ function normalizeToolMap(value, defaults) {
   const result = { ...defaults }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return result
   for (const [name, enabled] of Object.entries(value)) {
+    if (enabled === undefined) continue
     result[name] = !!enabled
   }
   return result
@@ -153,6 +158,7 @@ function normalizeConfig(raw = {}) {
   const enabledSkills = Array.isArray(source.enabledSkills)
     ? source.enabledSkills.map(item => String(item || '').trim()).filter(Boolean).slice(0, 32)
     : defaults.enabledSkills
+  const persona = normalizePersonaConfig(source.persona, defaults.persona)
   const queue = normalizeQueueConfig(source.queue, defaults.queue)
   const planMode = normalizePlanModeConfig(source.planMode, defaults.planMode)
   const push = normalizePushConfig(source.push, defaults.push)
@@ -161,7 +167,7 @@ function normalizeConfig(raw = {}) {
     enabled: source.memory?.enabled === undefined ? defaults.memory.enabled : !!source.memory.enabled,
     adminOnly: source.memory?.adminOnly === undefined ? defaults.memory.adminOnly : !!source.memory.adminOnly,
   }
-  return { version: 1, channels, dangerousPolicy, autoRoute, enabledSkills, readFileRoots, queue, planMode, push, cron, memory }
+  return { version: 1, channels, dangerousPolicy, autoRoute, enabledSkills, persona, readFileRoots, queue, planMode, push, cron, memory }
 }
 
 function normalizeInteger(value, min, max, fallback) {
@@ -177,6 +183,14 @@ function normalizeQueueConfig(value, defaults) {
     maxPerChannel: normalizeInteger(src.maxPerChannel, 1, 20, defaults.maxPerChannel),
     maxPendingPerUser: normalizeInteger(src.maxPendingPerUser, 0, 10, defaults.maxPendingPerUser),
     timeoutMs: normalizeInteger(src.timeoutMs, 5000, 10 * 60 * 1000, defaults.timeoutMs),
+  }
+}
+
+function normalizePersonaConfig(value, defaults) {
+  const src = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  return {
+    dashboardPersona: String(src.dashboardPersona || defaults.dashboardPersona || '').trim().slice(0, 120),
+    qqInheritChatPersona: src.qqInheritChatPersona === undefined ? defaults.qqInheritChatPersona !== false : !!src.qqInheritChatPersona,
   }
 }
 
@@ -228,6 +242,10 @@ async function patchAgentConfig(patch = {}) {
       ...current.channels,
       ...(patch.channels || {}),
     },
+    persona: {
+      ...current.persona,
+      ...(patch.persona || {}),
+    },
   }
   return saveAgentConfig(merged)
 }
@@ -275,6 +293,10 @@ function getEnabledSkills() {
   return getAgentConfig().enabledSkills.slice()
 }
 
+function getAgentPersonaConfig() {
+  return getAgentConfig().persona
+}
+
 function resetAgentConfigCache() {
   configCache = null
 }
@@ -292,5 +314,6 @@ module.exports = {
   getDangerousPolicy,
   isAutoRouteEnabled,
   getEnabledSkills,
+  getAgentPersonaConfig,
   resetAgentConfigCache,
 }

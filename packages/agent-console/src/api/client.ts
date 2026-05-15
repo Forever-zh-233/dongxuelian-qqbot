@@ -61,6 +61,8 @@ export async function verifyAdmin(password: string) {
 export const api = {
   getConfig: () => request<any>('/agent/config'),
   saveConfig: (payload: any) => request<any>('/agent/config', { method: 'PUT', body: JSON.stringify(payload) }),
+  personas: () => request<any>('/agent/personas'),
+  savePersona: (payload: any) => request<any>('/agent/persona', { method: 'PUT', body: JSON.stringify(payload) }),
   chat: (message: string, history: any[]) => request<any>('/agent/chat', { method: 'POST', body: JSON.stringify({ message, history }) }, 90000),
   pending: () => request<any>('/tools/pending'),
   confirm: (pendingId: string) => request<any>('/agent/confirm', { method: 'POST', body: JSON.stringify({ pendingId }) }, 90000),

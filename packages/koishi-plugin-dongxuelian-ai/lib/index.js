@@ -103,6 +103,9 @@ const {
   extractAtIds,
   isDirectAtBot, getBotMentionCount, hasOtherMentions,
   formatPercent,
+  isJailbreakAttempt,
+  sanitizeUserInput,
+  pickJailbreakFallbackReply,
   readTextFile, writeTextFile, readJsonFile, writeJsonFile,
   shouldTriggerRandom, calculateWillFactor,
   normalizeUrl,
@@ -1096,6 +1099,10 @@ exports.apply = (ctx) => {
     enqueueForChannel(channelKey, async () => {
       try {
         let route = heuristicRoute(userText, 'qq')
+        if (isJailbreakAttempt(sanitizeUserInput(userText))) {
+          const reply = pickJailbreakFallbackReply()
+          return safeSendReply(ctx, session, reply, randomTriggered)
+        }
         if (route.reason === 'needs-llm') {
           const agentConfig = require('./agent/config').getAgentConfig()
           configureAgentQueue(agentConfig.queue || {})

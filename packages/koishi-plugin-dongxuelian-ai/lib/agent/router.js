@@ -8,6 +8,7 @@ const { requestChatCompletions } = require('../api')
 const { loadConfig } = require('../runtime-config')
 const { isAutoRouteEnabled } = require('./config')
 const { getToolDefinitions } = require('./tools/registry')
+const { cleanExplicitSearchQuery, buildSearchQueries } = require('./search-query')
 
 const SEARCH_PREFIX_RE = /(?:调用\s*(?:搜索工具|web_search)|web_search|上网查(?:一下|查)?|联网查(?:一下|查)?|联网搜索(?:一下)?|网上查(?:一下|查)?|搜一下|搜索一下|帮我查(?:一下|查)?|查一下)/gi
 const EXPLICIT_AGENT_RE = /(?:调用\s*(?:搜索工具|web_search)|web_search|上网查|联网查|联网搜索|网上查|搜一下|搜索一下|帮我查|查一下).{0,80}(?:最新|现在|当前|版本|角色|新闻|资料|是谁|是什么)|(?:最新角色|当前版本|现在是什么版本)/i
@@ -51,11 +52,13 @@ async function llmRoute(userText = '', channel = 'qq') {
 
 function buildExplicitSearchRunOptions(userText = '') {
   if (!EXPLICIT_SEARCH_RE.test(String(userText || ''))) return {}
-  const query = String(userText || '').replace(SEARCH_PREFIX_RE, '').trim() || String(userText || '').trim()
+  const query = cleanExplicitSearchQuery(userText) || String(userText || '').trim()
+  const queries = buildSearchQueries(query)
+  const primaryQuery = queries[0] || query
   return {
-    systemExtra: [{ role: 'system', content: '用户明确要求联网搜索。必须先调用 web_search 获取最新信息；如果 API 搜索失败，web_search 会改用受控浏览器搜索。根据工具结果回答，不要凭记忆回答，不要说自己正在查但不调用工具。' }],
+    systemExtra: [{ role: 'system', content: '用户明确要求联网搜索。必须先调用 web_search 获取最新信息；如果 API 搜索失败，web_search 会改用受控浏览器搜索。只能根据工具结果回答，不要凭记忆回答。若工具结果为空、明显不相关、或主要是素材/模板/图片/下载站，必须说“这次搜索没有拿到可靠结果”，并简要说明搜索链路问题，不要编造答案。用户追问“你怎么知道/是搜索到的吗”时，要诚实说明依据来自本轮工具结果。' }],
     forceTools: ['web_search'],
-    preExecuteTools: [{ name: 'web_search', args: { query } }],
+    preExecuteTools: [{ name: 'web_search', args: { query: primaryQuery, queries } }],
   }
 }
 

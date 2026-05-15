@@ -154,6 +154,11 @@ async function previewAgentWorkspaceFile(target) {
   return meta
 }
 
+async function getAgentEffectiveReadRoots() {
+  const guard = require(path.join(AI_LIB, 'agent', 'path-guard'))
+  return guard.getAgentPathAllowedRoots()
+}
+
 function getAgentEnvStatus() {
   const constants = require(path.join(AI_LIB, 'constants'))
   const files = [
@@ -3314,7 +3319,8 @@ const server = http.createServer(async (req, res) => {
       const safety = require(path.join(AI_LIB, 'agent', 'safety'))
       const stats = require(path.join(AI_LIB, 'agent', 'stats')).getStats()
       const skills = require(path.join(AI_LIB, 'agent', 'skills')).listAgentSkills()
-      const effectiveReadRoots = Array.isArray(agentConfig.readFileRoots) && agentConfig.readFileRoots.length ? agentConfig.readFileRoots : [process.cwd()]
+      const personas = require(path.join(AI_LIB, 'agent', 'persona-context')).listAgentPersonasForConsole()
+      const effectiveReadRoots = await getAgentEffectiveReadRoots()
       const qqEnabledTools = new Set(registry.getToolDefinitions('qq').map(item => item.function.name))
       const dashboardEnabledTools = new Set(registry.getToolDefinitions('dashboard').map(item => item.function.name))
       const tools = registry.getToolSummaries().map(tool => ({
@@ -3322,8 +3328,38 @@ const server = http.createServer(async (req, res) => {
         qqEnabled: qqEnabledTools.has(tool.name),
         dashboardEnabled: dashboardEnabledTools.has(tool.name),
       }))
-      return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills, effectiveReadRoots })
+      return json(res, { ok: true, config: agentConfig, mode: safety.getMode(), stats, tools, skills, personas, effectiveReadRoots })
     } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/personas' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig(true)
+      const personas = require(path.join(AI_LIB, 'agent', 'persona-context')).listAgentPersonasForConsole()
+      return json(res, { ok: true, personas, persona: agentConfig.persona || { dashboardPersona: '', qqInheritChatPersona: true } })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/persona' && req.method === 'PUT') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const agentConfig = require(path.join(AI_LIB, 'agent', 'config'))
+        const current = agentConfig.getAgentConfig()
+        const personaName = String(data.dashboardPersona || '').trim()
+        const personas = require(path.join(AI_LIB, 'agent', 'persona-context')).listAgentPersonasForConsole()
+        if (personaName && !personas.some(item => item.name === personaName)) return json(res, { ok: false, message: '未知人格：' + personaName }, 400)
+        current.persona = {
+          dashboardPersona: personaName,
+          qqInheritChatPersona: data.qqInheritChatPersona === undefined ? current.persona?.qqInheritChatPersona !== false : !!data.qqInheritChatPersona,
+        }
+        const saved = await agentConfig.saveAgentConfig(current)
+        return json(res, { ok: true, persona: saved.persona, message: 'Agent 人格已更新' })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 400) }
+    })
+    return
   }
 
   if (pathname === '/dashboard/api/agent/stats' && req.method === 'GET') {
@@ -3481,6 +3517,7 @@ const server = http.createServer(async (req, res) => {
           channelKey: 'dashboard',
           userId: String(data.userId || 'dashboard'),
           userName: String(data.userName || 'Dashboard'),
+          channel: 'dashboard',
         })
         return json(res, { ok: true, ...result })
       } catch (e) { return json(res, { ok: false, message: e.message }, 400) }

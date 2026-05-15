@@ -5,6 +5,7 @@ const dns = require('dns/promises')
 const net = require('net')
 const { DATA_DIR } = require('../../constants')
 const { assertExistingAgentPathInsideRoots } = require('../path-guard')
+const { sortSearchResults, isLowQualitySearchResult } = require('../search-query')
 
 let browser = null
 let page = null
@@ -250,6 +251,7 @@ function isUsefulSearchResult(item = {}, query = '') {
   if (/^(全部|搜索|图片|视频|地图|资讯|更多|工具|时间不限|Any time|Tools|WEB|IMAGES|VIDEOS|MAPS)$/i.test(title)) return false
   if (/某些结果已被删除|Skip to content|Accessibility Feedback|辅助功能反馈|跳至内容/.test(title)) return false
   if (/javascript:|\/search\?|\/images\/search|\/videos\/search|go\.microsoft\.com\/fwlink/i.test(url)) return false
+  if (isLowQualitySearchResult(item)) return false
   return hasQuerySignal(item, query)
 }
 
@@ -288,10 +290,10 @@ async function extractSearchResults(query) {
     if (seen.has(key)) continue
     seen.add(key)
     useful.push(item)
-    if (useful.length >= 8) break
   }
-  if (useful.length) {
-    const lines = useful.map((item, index) => `${index + 1}. ${item.title}\n   ${item.url}\n   ${item.snippet || item.text.slice(0, 240) || '(无摘要)'}`)
+  const ranked = sortSearchResults(useful, query).slice(0, 8)
+  if (ranked.length) {
+    const lines = ranked.map((item, index) => `${index + 1}. ${item.title}\n   ${item.url}\n   可信度分：${item.score}\n   ${item.snippet || item.text.slice(0, 240) || '(无摘要)'}`)
     return `已搜索：${query}\n搜索结果：\n${lines.join('\n')}`
   }
   return ''

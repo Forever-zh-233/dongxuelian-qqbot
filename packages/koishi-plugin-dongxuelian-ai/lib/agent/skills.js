@@ -6,12 +6,9 @@
  */
 const fs = require('fs')
 const path = require('path')
-const { SKILLS_DIR, SKILLS_CORE_DIR, SKILLS_MODES_DIR, SKILLS_PERSONAS_DIR, SKILLS_LORE_DIR } = require('../constants')
+const { SKILLS_DIR, SKILLS_LORE_DIR } = require('../constants')
 
 const SKILL_DIRS = [
-  { kind: 'core', dir: SKILLS_CORE_DIR },
-  { kind: 'mode', dir: SKILLS_MODES_DIR },
-  { kind: 'persona', dir: SKILLS_PERSONAS_DIR },
   { kind: 'lore', dir: SKILLS_LORE_DIR },
   { kind: 'docs', dir: path.join(SKILLS_DIR, 'docs') },
 ]

@@ -106,6 +106,7 @@ async function run(t) {
   ], async (result, mocked, session, calls) => {
     checkSentIncludes(t, 'scenario explicit web_search request sends Agent reply', result, 'agent-search-ok')
     t.check('scenario explicit web_search request used tool result before model reply', calls.length === 1 && JSON.stringify(calls[0].requestBody.messages || []).includes('已搜索：鸣潮 最新角色'), JSON.stringify(calls.map(call => call.requestBody)))
+    t.check('scenario explicit web_search prompt forbids fabricating from irrelevant results', JSON.stringify(calls[0].requestBody.messages || []).includes('搜索没有拿到可靠结果') && JSON.stringify(calls[0].requestBody.messages || []).includes('工具结果是事实边界'), JSON.stringify(calls[0].requestBody.messages || []))
     t.check('scenario explicit web_search request exposes web_search', calls[0].requestBody.tools.some(item => item.function && item.function.name === 'web_search'), JSON.stringify(calls[0].requestBody.tools))
   }, {
     input: '调用web_search查鸣潮最新角色是谁',
@@ -123,6 +124,37 @@ async function run(t) {
       delete webSearch.__scenarioOriginalExecute
     }
   } catch {}
+
+  await runChatCase(t, 'QQ Agent inherits selected chat persona', [
+    { json: { choices: [{ message: { content: 'agent-persona-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario QQ Agent inherits persona reply', result, 'agent-persona-ok')
+    const prompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario QQ Agent prompt includes selected persona marker', prompt.includes('AGENT_PERSONA_MARKER'), prompt)
+    t.check('scenario QQ Agent prompt includes core marker', prompt.includes('AGENT_CORE_MARKER'), prompt)
+    t.check('scenario QQ Agent prompt includes anti-ooc guard', prompt.includes('Agent 防越狱') && prompt.includes('QQ 渠道不具备服务器管理权限'), prompt)
+  }, {
+    input: '莲莲 agent 现在几点',
+    setup(session, { data }) {
+      data.writeText('ai-skills/core/SKILL.persona-core.md', [
+        '---',
+        'name: persona-core',
+        '---',
+        'AGENT_CORE_MARKER',
+      ].join('\n'))
+      data.writeText('ai-skills/personas/SKILL.agent-marker.md', [
+        '---',
+        'name: Agent测试人格',
+        'description: agent persona test',
+        '---',
+        'AGENT_PERSONA_MARKER',
+      ].join('\n'))
+      data.writeJson('ai-persona-users.json', { [session.userId]: 'Agent测试人格' })
+      const persona = require(path.join(AI_ROOT, 'lib', 'persona.js'))
+      persona.loadPersonaUsers()
+    },
+    waitFor: message => String(message).includes('agent-persona-ok'),
+  })
 
   await runChatCase(t, 'reasoning-only fallback', [
     { json: { choices: [{ message: { content: '', reasoning_content: 'reasoning-secret' } }] } },

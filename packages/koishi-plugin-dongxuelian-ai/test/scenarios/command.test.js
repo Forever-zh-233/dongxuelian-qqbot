@@ -77,21 +77,30 @@ async function run(t) {
     checkSentNonEmpty(t, 'scenario admin tool switch accepted', adminToolSwitch)
     t.check('scenario admin tool switch writes enabled tool', data.readJson('ai-tool-config.json').channels.qq.tools.web_search === true)
 
+    const blockedQqShell = await run(makeSession({ content: '\u5de5\u5177\u5f00\u5173 qq execute_shell \u5f00' }))
+    checkSentNonEmpty(t, 'scenario qq high-risk tool switch replies', blockedQqShell)
+    t.check('scenario qq shell switch stays disabled', data.readJson('ai-tool-config.json').channels.qq.tools.execute_shell === false)
+
     const agentSkillList = await run(makeSession({ content: '\u5de5\u5177Skill \u5217\u8868' }))
     checkSentNonEmpty(t, 'scenario agent skill list replies', agentSkillList)
-    t.check('scenario agent skill list shows fixture persona', agentSkillList.sent.join('\n').includes('\u6d4b\u8bd5\u4eba\u683c'), JSON.stringify(agentSkillList.sent))
+    t.check('scenario agent skill list excludes fixture persona', !agentSkillList.sent.join('\n').includes('\u6d4b\u8bd5\u4eba\u683c'), JSON.stringify(agentSkillList.sent))
+    t.check('scenario agent skill list shows real skill fixture', agentSkillList.sent.join('\n').includes('wuwa-lore'), JSON.stringify(agentSkillList.sent))
 
     const nonAdminSkillSwitch = await run(makeSession({
       userId: '12345',
       author: { id: '12345', name: 'member' },
-      content: '\u5de5\u5177Skill \u5f00 \u6d4b\u8bd5\u4eba\u683c',
+      content: '\u5de5\u5177Skill \u5f00 wuwa-lore',
     }))
     checkSentNonEmpty(t, 'scenario non-admin agent skill switch rejected', nonAdminSkillSwitch)
-    t.check('scenario non-admin agent skill switch does not write enabled skill', !data.readJson('ai-tool-config.json').enabledSkills.includes('\u6d4b\u8bd5\u4eba\u683c'))
+    t.check('scenario non-admin agent skill switch does not write enabled skill', !data.readJson('ai-tool-config.json').enabledSkills.includes('wuwa-lore'))
 
-    const adminSkillSwitch = await run(makeSession({ content: '\u5de5\u5177Skill \u5f00 \u6d4b\u8bd5\u4eba\u683c' }))
+    const personaSkillSwitch = await run(makeSession({ content: '\u5de5\u5177Skill \u5f00 \u6d4b\u8bd5\u4eba\u683c' }))
+    checkSentNonEmpty(t, 'scenario persona cannot be enabled as skill replies', personaSkillSwitch)
+    t.check('scenario persona cannot be enabled as skill', !data.readJson('ai-tool-config.json').enabledSkills.includes('\u6d4b\u8bd5\u4eba\u683c'))
+
+    const adminSkillSwitch = await run(makeSession({ content: '\u5de5\u5177Skill \u5f00 wuwa-lore' }))
     checkSentNonEmpty(t, 'scenario admin agent skill switch accepted', adminSkillSwitch)
-    t.check('scenario admin agent skill switch writes enabled skill', data.readJson('ai-tool-config.json').enabledSkills.includes('\u6d4b\u8bd5\u4eba\u683c'))
+    t.check('scenario admin agent skill switch writes enabled skill', data.readJson('ai-tool-config.json').enabledSkills.includes('wuwa-lore'))
 
     const emotion = await run(makeSession({ content: '\u4eca\u65e5\u60c5\u7eea' }))
     checkSentNonEmpty(t, 'scenario today emotion empty cache replies', emotion)

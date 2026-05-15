@@ -6,6 +6,7 @@
  */
 const fs = require('fs/promises')
 const path = require('path')
+const { DATA_DIR, SKILLS_DIR } = require('../constants')
 const { getReadFileRoots } = require('./config')
 
 function normalizeAgentPathCase(value) {
@@ -21,7 +22,33 @@ function isAgentPathInside(target, root) {
 
 function getAgentPathConfiguredRoots() {
   const roots = getReadFileRoots()
-  return roots.length > 0 ? roots : [process.cwd()]
+  return roots.length > 0 ? mergeConfiguredAndDefaultRoots(roots) : getAgentPathDefaultRoots()
+}
+
+function pushUniqueRoot(result, root) {
+  const value = path.resolve(String(root || ''))
+  if (!value) return
+  const key = normalizeAgentPathCase(value)
+  if (!result.some(item => normalizeAgentPathCase(item) === key)) result.push(value)
+}
+
+function getAgentPathDefaultRoots() {
+  const result = []
+  pushUniqueRoot(result, process.env.KOISHI_DIR)
+  pushUniqueRoot(result, process.cwd())
+  pushUniqueRoot(result, path.resolve(__dirname, '..', '..', '..', '..'))
+  pushUniqueRoot(result, path.resolve(__dirname, '..', '..'))
+  pushUniqueRoot(result, DATA_DIR)
+  pushUniqueRoot(result, SKILLS_DIR)
+  return result
+}
+
+function mergeConfiguredAndDefaultRoots(roots = []) {
+  const result = []
+  for (const root of roots) pushUniqueRoot(result, root)
+  pushUniqueRoot(result, DATA_DIR)
+  pushUniqueRoot(result, SKILLS_DIR)
+  return result
 }
 
 async function realpathOrResolvedAgentPath(target) {
@@ -69,6 +96,7 @@ async function resolveAgentDefaultRoot() {
 module.exports = {
   isAgentPathInside,
   getAgentPathAllowedRoots,
+  getAgentPathDefaultRoots,
   assertExistingAgentPathInsideRoots,
   assertNewAgentPathInsideRoots,
   resolveAgentDefaultRoot,
