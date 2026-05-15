@@ -246,6 +246,8 @@ function findRelevantAgentSkills(query = '', options = {}) {
       if (/ppt|pptx|演示|幻灯片/i.test(query) && /^pptx$/i.test(skill.name)) score += 8
       if (/pdf/i.test(query) && /^pdf$/i.test(skill.name)) score += 8
       if (/docx|word|文档/i.test(query) && /^docx$/i.test(skill.name)) score += 8
+      if (/读文件|读日志|看日志|查日志|查看文件|查看日志|log|文件内容|tail/i.test(query) && skill.name === 'file_reader') score += 10
+      if (/计划|规划|分步骤|怎么做|步骤|方案|遇阻|放弃|换方法/i.test(query) && skill.name === 'make_plan') score += 10
       return { skill, score }
     })
     .filter(item => item.score > 0)
