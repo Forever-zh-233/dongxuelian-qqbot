@@ -7,6 +7,7 @@ const path = require('path')
 const { assertNewAgentPathInsideRoots, assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const MAX_CONTENT_BYTES = 256 * 1024
+const MAX_OVERWRITE_TARGET_BYTES = 2 * 1024 * 1024
 
 module.exports = {
   definition: {
@@ -40,6 +41,7 @@ module.exports = {
     try { existing = await fs.stat(abs) } catch {}
     if (existing) await assertExistingAgentPathInsideRoots(abs, '路径')
     if (existing && existing.isDirectory()) throw new Error(`目标是目录：${filePath}`)
+    if (existing && existing.size > MAX_OVERWRITE_TARGET_BYTES) throw new Error(`目标文件过大，拒绝覆盖：${existing.size} bytes`)
     if (existing && !params.overwrite) throw new Error('文件已存在，如需覆盖请设置 overwrite=true')
 
     if (params.createDirectories) await fs.mkdir(parent, { recursive: true })

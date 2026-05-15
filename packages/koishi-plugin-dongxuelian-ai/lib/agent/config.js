@@ -10,6 +10,7 @@ const path = require('path')
 const { TOOL_CONFIG_FILE } = require('../constants')
 
 const KNOWN_CHANNELS = new Set(['qq', 'dashboard'])
+const MAX_TOOL_CONFIG_BYTES = 512 * 1024
 const DEFAULT_CONFIG = Object.freeze({
   version: 1,
   channels: {
@@ -214,6 +215,8 @@ function normalizePushConfig(value, defaults) {
 
 function readConfigFile() {
   try {
+    const stat = fs.statSync(TOOL_CONFIG_FILE)
+    if (!stat.isFile() || stat.size > MAX_TOOL_CONFIG_BYTES) return null
     const text = fs.readFileSync(TOOL_CONFIG_FILE, 'utf8').replace(/^﻿/, '')
     return JSON.parse(text)
   } catch {

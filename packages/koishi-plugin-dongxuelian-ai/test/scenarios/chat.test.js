@@ -165,7 +165,7 @@ async function run(t) {
     t.check('scenario QQ Agent prompt excludes group persona marker', !prompt.includes('CHANG_LI_AGENT_MARKER') && !prompt.includes('当前人格：长离'), prompt)
     t.check('scenario QQ Agent base system does not force Dongxuelian over selected persona', prompt.includes('具体人格由后续【Agent 人格同步】system 消息决定') && !prompt.includes('你是东雪莲，一个带有 Agent 能力'), prompt)
   }, {
-    input: '莲莲 agent 帮我查一下当前设置',
+    input: '莲莲 agent 总结当前设置',
     setup(session, { data }) {
       data.writeText('ai-skills/personas/SKILL.amis.md', [
         '---',

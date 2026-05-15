@@ -11,6 +11,8 @@ const { DATA_DIR } = require('../constants')
 const { getAgentConfig } = require('./config')
 
 const PUSH_LOG_FILE = path.join(DATA_DIR, 'agent-push-log.jsonl')
+const MAX_PUSH_LOG_READ_BYTES = 512 * 1024
+const MAX_PUSH_LOG_FILE_BYTES = 2 * 1024 * 1024
 const quotaCache = new Map()
 
 function todayKey(now = Date.now()) {
@@ -25,7 +27,14 @@ function countLoggedQuota(channelKey, now = Date.now()) {
   const day = todayKey(now)
   const target = String(channelKey || 'unknown')
   try {
-    const lines = fs.readFileSync(PUSH_LOG_FILE, 'utf8').split(/\r?\n/).filter(Boolean)
+    const stat = fs.statSync(PUSH_LOG_FILE)
+    if (!stat.isFile()) return 0
+    const fd = fs.openSync(PUSH_LOG_FILE, 'r')
+    const readBytes = Math.min(stat.size, MAX_PUSH_LOG_READ_BYTES)
+    const buffer = Buffer.alloc(readBytes)
+    try { fs.readSync(fd, buffer, 0, readBytes, Math.max(0, stat.size - readBytes)) }
+    finally { fs.closeSync(fd) }
+    const lines = buffer.toString('utf8').split(/\r?\n/).filter(Boolean)
     let count = 0
     for (const line of lines) {
       let entry = null
@@ -47,6 +56,19 @@ function truncateText(text = '', max = 800) {
 async function appendLog(entry) {
   await fsp.mkdir(path.dirname(PUSH_LOG_FILE), { recursive: true })
   await fsp.appendFile(PUSH_LOG_FILE, JSON.stringify(entry) + '\n', 'utf8')
+  try {
+    const stat = await fsp.stat(PUSH_LOG_FILE)
+    if (stat.isFile() && stat.size > MAX_PUSH_LOG_FILE_BYTES) {
+      const fd = await fsp.open(PUSH_LOG_FILE, 'r')
+      const keepBytes = MAX_PUSH_LOG_READ_BYTES
+      const buffer = Buffer.alloc(keepBytes)
+      try { await fd.read(buffer, 0, keepBytes, Math.max(0, stat.size - keepBytes)) }
+      finally { await fd.close() }
+      const text = buffer.toString('utf8')
+      const trimmed = text.slice(text.indexOf('\n') + 1)
+      await fsp.writeFile(PUSH_LOG_FILE, trimmed || text, 'utf8')
+    }
+  } catch {}
 }
 
 function getQuota(channelKey, now = Date.now()) {
@@ -139,7 +161,14 @@ async function cronResult({ cronId, channelKey, text, bot } = {}) {
 
 function listPushLog(limit = 50) {
   try {
-    const lines = fs.readFileSync(PUSH_LOG_FILE, 'utf8').split(/\r?\n/).filter(Boolean)
+    const stat = fs.statSync(PUSH_LOG_FILE)
+    if (!stat.isFile()) return []
+    const fd = fs.openSync(PUSH_LOG_FILE, 'r')
+    const readBytes = Math.min(stat.size, MAX_PUSH_LOG_READ_BYTES)
+    const buffer = Buffer.alloc(readBytes)
+    try { fs.readSync(fd, buffer, 0, readBytes, Math.max(0, stat.size - readBytes)) }
+    finally { fs.closeSync(fd) }
+    const lines = buffer.toString('utf8').split(/\r?\n/).filter(Boolean)
     return lines.slice(-Math.max(1, Math.min(200, parseInt(limit, 10) || 50))).reverse().map(line => {
       try { return JSON.parse(line) } catch { return { raw: line } }
     })

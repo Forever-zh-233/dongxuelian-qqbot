@@ -268,6 +268,11 @@ let userBlacklistCache = null
 let userBlacklistFingerprint = ''
 const lastEmotionCache = new Map()
 
+function restoreTodayCacheEntry(key, data) {
+  if (!data || data.date !== todayCst() || !Array.isArray(data.messages) || data.messages.length <= 0) return
+  channelTodayCache.set(key, { date: data.date, messages: data.messages.slice(-3000), updatedAt: Date.now() })
+}
+
 // 人格系统：per-group persona 配置
 // 格式: { "channelKey": { persona: "name" | null } }
 
@@ -639,7 +644,7 @@ exports.apply = (ctx) => {
           const data = JSON.parse(raw)
           if (data && data.date === today && Array.isArray(data.messages) && data.messages.length > 0) {
             const key = f.replace('today-cache-', '').replace('.json', '')
-            channelTodayCache.set(key, { date: today, messages: data.messages, updatedAt: Date.now() })
+            restoreTodayCacheEntry(key, data)
           }
         } catch {}
       }

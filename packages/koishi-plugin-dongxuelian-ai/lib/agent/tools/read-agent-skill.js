@@ -7,7 +7,8 @@
 const { readAgentSkill } = require('../skills')
 const { getEnabledSkills } = require('../config')
 
-function isSkillEnabled(name) {
+function isSkillEnabled(name, context = {}) {
+  if (context.channel === 'dashboard' && context.autoRelevantSkill !== false) return true
   const target = String(name || '').trim().toLowerCase()
   return !!target && getEnabledSkills().some(item => String(item || '').trim().toLowerCase() === target)
 }
@@ -26,8 +27,8 @@ module.exports = {
       required: ['name'],
     },
   },
-  async execute(params = {}) {
-    if (!isSkillEnabled(params.name)) throw new Error(`Agent Skill 未启用：${String(params.name || '').trim()}`)
+  async execute(params = {}, context = {}) {
+    if (!isSkillEnabled(params.name, context)) throw new Error(`Agent Skill 未启用：${String(params.name || '').trim()}`)
     const result = readAgentSkill(params.name, { file: params.file, maxChars: params.maxChars })
     const lines = [
       `Skill：${result.name}（${result.kind}）`,

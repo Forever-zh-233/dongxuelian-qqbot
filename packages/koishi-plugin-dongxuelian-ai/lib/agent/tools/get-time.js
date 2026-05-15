@@ -4,11 +4,15 @@
 const fs = require('fs')
 const path = require('path')
 const { DATA_DIR } = require('../../constants')
+const TZ_FILE = path.join(DATA_DIR, 'agent-user-timezones.json')
+const MAX_TZ_FILE_BYTES = 128 * 1024
 
 function getUserTimezone(userId) {
   if (!userId) return ''
   try {
-    const data = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'agent-user-timezones.json'), 'utf8'))
+    const stat = fs.statSync(TZ_FILE)
+    if (!stat.isFile() || stat.size > MAX_TZ_FILE_BYTES) return ''
+    const data = JSON.parse(fs.readFileSync(TZ_FILE, 'utf8'))
     return String(data[String(userId)] || '')
   } catch { return '' }
 }

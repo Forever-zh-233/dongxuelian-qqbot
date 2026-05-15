@@ -8,6 +8,7 @@ const { DATA_DIR } = require('../../constants')
 
 const LOG_DIRS = [path.resolve(process.cwd(), 'runtime', 'logs'), path.join(DATA_DIR, 'logs')]
 const MAX_FILE_BYTES = 1024 * 1024
+const MAX_LOG_TAIL_BYTES = 256 * 1024
 const SECRET_RE = /(?:api[_-]?key|token|authorization|password|secret)[=:：\s]+[^\s,;]+/ig
 
 function redact(text = '') {
@@ -37,6 +38,19 @@ function parseSince(value = '') {
   return Number.isFinite(ts) ? ts : 0
 }
 
+async function readLogTail(file, stat) {
+  const size = Number(stat?.size || 0)
+  const handle = await fs.open(file, 'r')
+  try {
+    const length = Math.min(MAX_LOG_TAIL_BYTES, size)
+    const buffer = Buffer.alloc(length)
+    await handle.read(buffer, 0, length, Math.max(0, size - length))
+    return buffer.toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
 module.exports = {
   definition: {
     name: 'query_logs',
@@ -63,7 +77,7 @@ module.exports = {
     for (const file of files) {
       const stat = await fs.stat(file).catch(() => null)
       if (!stat || stat.size > MAX_FILE_BYTES || (since && stat.mtimeMs < since)) continue
-      const text = await fs.readFile(file, 'utf8').catch(() => '')
+      const text = await readLogTail(file, stat).catch(() => '')
       const lines = text.split(/\r?\n/)
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]

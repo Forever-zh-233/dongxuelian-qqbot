@@ -7,6 +7,7 @@ const { assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const MAX_FILE_BYTES = 512 * 1024
 const MAX_REPLACEMENT_BYTES = 256 * 1024
+const MAX_EDIT_RESULT_BYTES = 1024 * 1024
 
 function countOccurrences(text, needle) {
   let count = 0
@@ -61,6 +62,8 @@ module.exports = {
     const next = params.replaceAll
       ? content.split(params.oldString).join(params.newString)
       : content.replace(params.oldString, params.newString)
+    const nextBytes = Buffer.byteLength(next, 'utf8')
+    if (nextBytes > MAX_EDIT_RESULT_BYTES) throw new Error(`编辑后文件过大：${nextBytes} bytes，最大 ${MAX_EDIT_RESULT_BYTES} bytes`)
     await fs.writeFile(abs, next, 'utf8')
     return `已编辑：${abs}（替换 ${params.replaceAll ? occurrences : 1} 处）`
   },

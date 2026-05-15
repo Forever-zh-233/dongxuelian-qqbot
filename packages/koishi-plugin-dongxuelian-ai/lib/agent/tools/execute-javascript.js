@@ -6,6 +6,21 @@ const vm = require('vm')
 
 const BLOCKED = /\b(?:require|import|process|child_process|fs|global|globalThis|__dirname|__filename|module|exports|Function|eval)\b/
 const MAX_CODE_CHARS = 12000
+const MAX_RESULT_CHARS = 8000
+const MAX_JSONIFY_CHARS = 64000
+
+function safeStringifyResult(result) {
+  const seen = new WeakSet()
+  return JSON.stringify(result === undefined ? null : result, (key, value) => {
+    if (typeof value === 'string' && value.length > MAX_RESULT_CHARS) return value.slice(0, MAX_RESULT_CHARS) + `...(字符串截断，共 ${value.length} 字符)`
+    if (Array.isArray(value) && value.length > 2000) return value.slice(0, 2000)
+    if (value && typeof value === 'object') {
+      if (seen.has(value)) return '[Circular]'
+      seen.add(value)
+    }
+    return value
+  }, 2)
+}
 
 module.exports = {
   definition: {
@@ -28,7 +43,10 @@ module.exports = {
     const context = vm.createContext({ ...sandbox })
     const script = new vm.Script(`'use strict';\n${code}`)
     const result = script.runInContext(context, { timeout: 10000 })
-    return JSON.stringify(result === undefined ? null : result, null, 2)
+    const text = safeStringifyResult(result)
+    if (text && text.length > MAX_JSONIFY_CHARS) return text.slice(0, MAX_RESULT_CHARS) + `\n...(结果过大，截断前 ${text.length} 字符)`
+    if (text && text.length > MAX_RESULT_CHARS) return text.slice(0, MAX_RESULT_CHARS) + `\n...(结果截断，共 ${text.length} 字符)`
+    return text
   },
   dangerous: true,
   defaultChannels: ['dashboard'],

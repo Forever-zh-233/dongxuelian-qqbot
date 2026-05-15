@@ -15,6 +15,8 @@ const { isChannelEnabled, getEnabledSkills } = require('./config')
 const { buildAgentSkillSummary } = require('./skills')
 const { buildAgentMessages } = require('./messages')
 const { buildAgentPersonaContext, mergeAgentSystemExtra } = require('./persona-context')
+const { buildAgentWorkspaceContext } = require('./workspace-context')
+const { getAgentPathAllowedRoots } = require('./path-guard')
 const { recordAgentSession } = require('./sessions')
 const { MAX_TOOL_ROUNDS } = require('../constants')
 
@@ -178,9 +180,11 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
   for (const toolName of forceToolSet) tools = ensureToolDefinition(tools, toolName)
   const allowedToolNames = new Set(tools.map(item => item.function && item.function.name).filter(Boolean))
   const config = await loadConfig()
-  const skillSummary = buildAgentSkillSummary(getEnabledSkills())
+  const roots = channel === 'dashboard' ? await getAgentPathAllowedRoots() : []
+  const skillSummary = buildAgentSkillSummary(getEnabledSkills(), { query: userMessage })
   const personaExtra = buildAgentPersonaContext({ channel, channelKey, userId })
-  const allSystemExtra = mergeAgentSystemExtra(personaExtra, systemExtra, skillSummary ? [{ role: 'system', content: skillSummary }] : [])
+  const workspaceExtra = await buildAgentWorkspaceContext({ userMessage, channel, roots })
+  const allSystemExtra = mergeAgentSystemExtra(personaExtra, workspaceExtra, systemExtra, skillSummary ? [{ role: 'system', content: skillSummary }] : [])
   const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: allSystemExtra, history })
   for (const item of Array.isArray(preExecuteTools) ? preExecuteTools : []) {
     if (!item || !item.name) continue

@@ -8,6 +8,41 @@ const { readTextFile, isDashScopeConfig } = require('./utils')
 const path = require('path')
 const fs = require('fs')
 
+const MAX_IMAGE_BYTES = parseApiPositiveInt(process.env.DONGXUELIAN_MAX_IMAGE_BYTES, 4 * 1024 * 1024, 128 * 1024, 16 * 1024 * 1024)
+const MAX_REMOTE_IMAGE_BYTES = parseApiPositiveInt(process.env.DONGXUELIAN_MAX_REMOTE_IMAGE_BYTES, MAX_IMAGE_BYTES, 128 * 1024, 16 * 1024 * 1024)
+const MAX_API_CONFIG_FILE_BYTES = parseApiPositiveInt(process.env.DONGXUELIAN_API_CONFIG_MAX_BYTES, 256 * 1024, 4 * 1024, 1024 * 1024)
+const MAX_API_KEY_FILE_BYTES = parseApiPositiveInt(process.env.DONGXUELIAN_API_KEY_MAX_BYTES, 64 * 1024, 1 * 1024, 256 * 1024)
+
+function parseApiPositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function mimeFromImagePath(filePath = '') {
+  const ext = String(filePath || '').split('.').pop().toLowerCase()
+  return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' }[ext] || 'image/jpeg'
+}
+
+function readApiTextFileSync(file, maxBytes = MAX_API_KEY_FILE_BYTES) {
+  try {
+    const stat = fs.statSync(file)
+    if (!stat.isFile() || stat.size > maxBytes) return ''
+    return String(fs.readFileSync(file, 'utf8')).trim()
+  } catch {
+    return ''
+  }
+}
+
+function readApiJsonFileSync(file, fallback, maxBytes = MAX_API_CONFIG_FILE_BYTES) {
+  try {
+    const text = readApiTextFileSync(file, maxBytes)
+    return text ? JSON.parse(text) : fallback
+  } catch {
+    return fallback
+  }
+}
+
 function buildResponsesInput(messages = []) {
   return messages.filter(item => item && item.content).map(item => ({
     role: item.role === 'assistant' ? 'assistant' : item.role === 'system' ? 'system' : 'user',
@@ -81,7 +116,10 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
     config._originalConfig = { model: config.model, provider: config.provider, baseURL: config.baseURL, apiKey: config.apiKey }
   }
   const controller = new AbortController()
-  const timeout = config._fallbackTried ? 10000 : REQUEST_TIMEOUT
+  const requestedTimeout = Number(extraBody._timeoutMs)
+  const timeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? Math.max(1000, Math.min(REQUEST_TIMEOUT, requestedTimeout))
+    : config._fallbackTried ? 10000 : REQUEST_TIMEOUT
   const timer = setTimeout(() => controller.abort(), timeout)
   const filteredExtraBody = {}
   for (const key of ['max_tokens', 'enable_search', 'web_search_options', 'search_options', 'enable_thinking', 'thinking']) {
@@ -188,27 +226,21 @@ const FALLBACK_DEFAULTS = {
 }
 
 function readFallbackSteps() {
-  try {
-    const raw = fs.readFileSync(FALLBACK_CHAINS_FILE, 'utf8')
-    const data = JSON.parse(raw)
-    if (data && data.chains) return data.chains
-  } catch {}
+  const data = readApiJsonFileSync(FALLBACK_CHAINS_FILE, null)
+  if (data && data.chains) return data.chains
   return null
 }
 
 function readCustomProviders() {
-  try {
-    const raw = fs.readFileSync(CUSTOM_PROVIDERS_FILE, 'utf8')
-    return JSON.parse(raw)
-  } catch {}
-  return []
+  const data = readApiJsonFileSync(CUSTOM_PROVIDERS_FILE, [])
+  return Array.isArray(data) ? data : []
 }
 
 function resolveCustomProviderKey(providerId, fallbackKey) {
   const custom = readCustomProviders()
   const cp = custom.find(function(p) { return p.id === providerId })
   if (!cp || !cp.keyFile) return fallbackKey
-  try { return String(fs.readFileSync(cp.keyFile, 'utf8')).trim().replace(/[\r\n]+/g, '') } catch { return fallbackKey }
+  return readApiTextFileSync(cp.keyFile).replace(/[\r\n]+/g, '') || fallbackKey
 }
 
 function resolveFallbackProvider(fbStep, config) {
@@ -222,7 +254,8 @@ function resolveFallbackProvider(fbStep, config) {
   const cp = custom.find(function(p) { return p.id === fbStep.provider })
   if (!cp) return config.apiKey
   if (cp.keyFile) {
-    try { return String(fs.readFileSync(cp.keyFile, 'utf8')).trim().replace(/[\r\n]+/g, '') } catch {}
+    const key = readApiTextFileSync(cp.keyFile).replace(/[\r\n]+/g, '')
+    if (key) return key
   }
   return config.apiKey
 }
@@ -243,12 +276,12 @@ async function buildFallbackConfig(config, step, fallbackSet) {
     const cp = (readCustomProviders()).find(function(p) { return p.id === fb.provider })
     if (!cp) return null
     let apiKey = config.apiKey
-    if (cp.keyFile) { try { apiKey = String(fs.readFileSync(cp.keyFile, 'utf8')).trim().replace(/[\r\n]+/g, '') } catch {} }
+    if (cp.keyFile) apiKey = readApiTextFileSync(cp.keyFile).replace(/[\r\n]+/g, '') || apiKey
     return Object.assign({}, config, { _fallbackTried: step, provider: fb.provider, model: fb.model, baseURL: String(cp.baseURL || '').replace(/\/+$/, ''), apiKey: apiKey })
   }
   let nextKey = config.apiKey
   if (fb.keyFile) {
-    try { nextKey = (String(fs.readFileSync(fb.keyFile, 'utf8'))).trim().replace(/[\r\n]+/g, '') } catch {}
+    nextKey = readApiTextFileSync(fb.keyFile).replace(/[\r\n]+/g, '') || nextKey
   }
   return Object.assign({}, config, { _fallbackTried: step, provider: fb.provider, model: fb.model, baseURL: String(provider.baseURL).replace(/\/+$/, ''), apiKey: nextKey })
 }
@@ -345,7 +378,14 @@ function getGroupInfo(groupId, timeoutMs = 800) {
 }
 
 async function readImageAsBase64(filePath) {
-  try { const buf = require('fs').readFileSync(filePath); const ext = filePath.split('.').pop().toLowerCase(); const m = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' }; return `data:${m[ext] || 'image/jpeg'};base64,${buf.toString('base64')}` } catch { return null }
+  try {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_IMAGE_BYTES) return null
+    const buf = fs.readFileSync(filePath)
+    return `data:${mimeFromImagePath(filePath)};base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  }
 }
 
 function extractImageFileFromElements(session) {
@@ -377,11 +417,39 @@ async function downloadImageAsBase64(url, timeoutMs = 5000) {
         finishDownload(null)
       }, timeoutMs)
       request = mod.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+        const status = Number(res.statusCode || 0)
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume()
+          return finishDownload(null)
+        }
+        if (status !== 200) {
+          res.resume()
+          return finishDownload(null)
+        }
+        const type = String(res.headers['content-type'] || 'image/jpeg').split(';')[0].trim().toLowerCase()
+        if (type && !/^image\/(?:png|jpe?g|gif|webp|bmp)$/.test(type)) {
+          res.resume()
+          return finishDownload(null)
+        }
+        const declared = parseInt(res.headers['content-length'], 10)
+        if (Number.isFinite(declared) && declared > MAX_REMOTE_IMAGE_BYTES) {
+          res.resume()
+          return finishDownload(null)
+        }
         const chunks = []
-        res.on('data', c => chunks.push(c))
+        let received = 0
+        res.on('data', c => {
+          received += c.length
+          if (received > MAX_REMOTE_IMAGE_BYTES) {
+            try { if (request) request.destroy() } catch {}
+            return finishDownload(null)
+          }
+          chunks.push(c)
+        })
         res.on('end', () => {
           const buf = Buffer.concat(chunks)
-          finishDownload(`data:${res.headers['content-type'] || 'image/jpeg'};base64,${buf.toString('base64')}`)
+          if (!buf.length || buf.length > MAX_REMOTE_IMAGE_BYTES) return finishDownload(null)
+          finishDownload(`data:${type || 'image/jpeg'};base64,${buf.toString('base64')}`)
         })
         res.on('error', () => finishDownload(null))
       })

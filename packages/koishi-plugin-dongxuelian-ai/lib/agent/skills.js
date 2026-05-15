@@ -18,7 +18,15 @@ const TEXT_FILE_RE = /\.(?:md|txt|json|js|ts|tsx|jsx|vue|css|html|yaml|yml|csv)$
 const MAX_REFERENCE_FILES = 40
 const DEFAULT_READ_CHARS = 12000
 const MAX_READ_CHARS = 24000
+const MAX_SKILL_INDEX_FILE_BYTES = parseAgentSkillPositiveInt(process.env.DONGXUELIAN_AGENT_SKILL_INDEX_MAX_BYTES, 256 * 1024, 8 * 1024, 2 * 1024 * 1024)
+const MAX_SKILL_REFERENCE_BYTES = parseAgentSkillPositiveInt(process.env.DONGXUELIAN_AGENT_SKILL_REFERENCE_MAX_BYTES, 512 * 1024, 16 * 1024, 2 * 1024 * 1024)
 const SKIP_REFERENCE_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'tmp', '.cache'])
+
+function parseAgentSkillPositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
 
 function parseFrontmatter(text) {
   const match = String(text || '').match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -46,6 +54,21 @@ function skillNameKey(name = '') {
   return skillNormalizeName(name).toLowerCase()
 }
 
+function skillSearchText(skill = '') {
+  if (!skill || typeof skill !== 'object') return ''
+  return [skill.name, skill.kind, skill.description, skill.path, ...(skill.references || [])].join('\n').toLowerCase()
+}
+
+function skillQueryTerms(query = '') {
+  return String(query || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_-]+/gu, ' ')
+    .split(/\s+/)
+    .map(item => item.trim())
+    .filter(item => item.length >= 2)
+    .slice(0, 12)
+}
+
 function skillPathKey(value = '') {
   const resolved = path.resolve(String(value || ''))
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
@@ -58,7 +81,11 @@ function skillPathInside(target, root) {
 }
 
 function skillReadText(file) {
-  try { return fs.readFileSync(file, 'utf8') } catch { return '' }
+  try {
+    const stat = fs.statSync(file)
+    if (!stat.isFile() || stat.size > MAX_SKILL_INDEX_FILE_BYTES) return ''
+    return fs.readFileSync(file, 'utf8')
+  } catch { return '' }
 }
 
 function skillRelativePath(file) {
@@ -84,6 +111,8 @@ function skillListReferences(rootDir, primaryFile) {
       if (!entry.isFile()) continue
       if (path.resolve(full) === primary) continue
       if (!TEXT_FILE_RE.test(entry.name)) continue
+      const stat = fs.statSync(full, { throwIfNoEntry: false })
+      if (!stat || !stat.isFile() || stat.size > MAX_SKILL_REFERENCE_BYTES) continue
       references.push(path.relative(root, full).replace(/\\/g, '/'))
     }
   }
@@ -179,7 +208,7 @@ function readAgentSkill(name, options = {}) {
   const file = skillResolveRequestedFile(skill, options.file)
   const stat = fs.statSync(file)
   if (!stat.isFile()) throw new Error(`不是 Skill 文件：${skillRelativePath(file)}`)
-  if (stat.size > 1024 * 1024) throw new Error(`Skill 文件过大：${stat.size} bytes`)
+  if (stat.size > MAX_SKILL_REFERENCE_BYTES) throw new Error(`Skill 文件过大：${stat.size} bytes`)
   const buffer = fs.readFileSync(file)
   if (buffer.includes(0)) throw new Error('Skill 文件疑似二进制，拒绝读取')
   const maxChars = Math.max(1000, Math.min(MAX_READ_CHARS, parseInt(options.maxChars, 10) || DEFAULT_READ_CHARS))
@@ -198,15 +227,49 @@ function readAgentSkill(name, options = {}) {
   }
 }
 
-function buildAgentSkillSummary(enabledNames = []) {
+function findRelevantAgentSkills(query = '', options = {}) {
+  const terms = skillQueryTerms(query)
+  if (!terms.length) return []
+  const limit = Math.max(1, Math.min(16, parseInt(options.limit, 10) || 8))
+  return listAgentSkills()
+    .map(skill => {
+      const text = skillSearchText(skill)
+      let score = 0
+      for (const term of terms) {
+        if (skillNameKey(skill.name).includes(term)) score += 8
+        if (String(skill.description || '').toLowerCase().includes(term)) score += 5
+        if (text.includes(term)) score += 2
+      }
+      if (/前端|dashboard|后台|控制台|源码|代码|文件|目录|agent|skill|技能|浏览器|browser|pdf|ppt|docx/i.test(query) && skill.name === 'QA_source_index') score += 6
+      if (/浏览器|网页|页面|截图|browser|cdp/i.test(query) && /^browser_/i.test(skill.name)) score += 8
+      if (/ppt|pptx|演示|幻灯片/i.test(query) && /^pptx$/i.test(skill.name)) score += 8
+      if (/pdf/i.test(query) && /^pdf$/i.test(skill.name)) score += 8
+      if (/docx|word|文档/i.test(query) && /^docx$/i.test(skill.name)) score += 8
+      return { skill, score }
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name, 'zh-Hans-CN'))
+    .slice(0, limit)
+    .map(item => item.skill)
+}
+
+function buildAgentSkillSummary(enabledNames = [], options = {}) {
   const enabled = new Set((enabledNames || []).map(skillNameKey).filter(Boolean))
-  if (enabled.size === 0) return ''
-  const selected = listAgentSkills().filter(skill => enabled.has(skillNameKey(skill.name))).slice(0, 32)
+  const selectedMap = new Map()
+  for (const skill of listAgentSkills()) {
+    if (enabled.has(skillNameKey(skill.name))) selectedMap.set(skillNameKey(skill.name), skill)
+  }
+  if (options.query) {
+    for (const skill of findRelevantAgentSkills(options.query, { limit: options.relevantLimit || 8 })) {
+      selectedMap.set(skillNameKey(skill.name), skill)
+    }
+  }
+  const selected = Array.from(selectedMap.values()).slice(0, 32)
   if (selected.length === 0) return ''
   const lines = [
     '已启用 Agent Skill 索引（轻量索引，不含正文）：',
     '需要某个 Skill 的完整流程或参考文件时，调用 read_agent_skill({ "name": "<Skill名>" })；不要凭索引猜测细节。',
-    '未启用、未读取的 Skill 视为不可用；人格/persona 不属于实用 Skill。',
+    options.query ? '本轮也会按用户语义自动列出相关 Skill；Dashboard 渠道允许读取这些相关 Skill 以完成工作。' : '未启用、未读取的 Skill 视为不可用；人格/persona 不属于实用 Skill。',
   ]
   for (const skill of selected) {
     const refs = skill.references.length ? `；参考文件：${skill.references.slice(0, 6).join(', ')}${skill.references.length > 6 ? '...' : ''}` : ''
@@ -218,6 +281,7 @@ function buildAgentSkillSummary(enabledNames = []) {
 module.exports = {
   listAgentSkills,
   findAgentSkill,
+  findRelevantAgentSkills,
   readAgentSkill,
   parseFrontmatter,
   buildAgentSkillSummary,

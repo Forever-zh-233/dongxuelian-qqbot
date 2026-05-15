@@ -205,6 +205,8 @@ export async function fetchLoggingConfig() { return get('/logging') }
 export async function saveLoggingConfig(data) { return put('/logging', data, true) }
 export async function fetchAgentConfig() { return get('/agent/config', true) }
 export async function saveAgentConfig(data) { return put('/agent/config', data, true) }
+export async function fetchAgentPersonas() { return get('/agent/personas', true) }
+export async function saveAgentPersona(data) { return put('/agent/persona', data, true) }
 export async function sendAgentMessage(message, history = []) { return post('/agent/chat', { message, history }, true, 60000) }
 export async function confirmAgentTool(pendingId = '') { return post('/agent/confirm', { pendingId }, true, 60000) }
 export async function rejectAgentTool(pendingId = '') { return post('/agent/reject', { pendingId }, true) }

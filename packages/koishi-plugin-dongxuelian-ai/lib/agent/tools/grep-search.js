@@ -8,6 +8,8 @@ const { assertExistingAgentPathInsideRoots, resolveAgentDefaultRoot, isAgentPath
 
 const MAX_FILE_BYTES = 512 * 1024
 const MAX_MATCHES = 200
+const MAX_LINE_CHARS = 240
+const MAX_TOTAL_OUTPUT_CHARS = 40000
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'dist-portable', '.claude', 'tmp'])
 
 function grepWildcardToRegExp(pattern = '*') {
@@ -72,7 +74,9 @@ module.exports = {
       const lines = buffer.toString('utf8').split(/\r?\n/)
       for (let i = 0; i < lines.length; i++) {
         if (regex.test(lines[i])) {
-          matches.push(`${file}:${i + 1}: ${lines[i].slice(0, 240)}`)
+          matches.push(`${file}:${i + 1}: ${lines[i].slice(0, MAX_LINE_CHARS)}`)
+          const joined = matches.join('\n')
+          if (joined.length > MAX_TOTAL_OUTPUT_CHARS) return `匹配 ${matches.length} 条（输出已截断）：\n${joined.slice(0, MAX_TOTAL_OUTPUT_CHARS)}`
           if (matches.length >= limit) return `匹配 ${matches.length} 条（已达上限）：\n${matches.join('\n')}`
         }
         regex.lastIndex = 0

@@ -40,6 +40,9 @@ const { logDebug } = require('./logging-config')
 const forgetPendingConfirm = new Map()
 const EMOTION_IMAGE_TEXT_LIMIT = 1500
 const EMOTION_FALLBACK_TEXT_LIMIT = 500
+const EMOTION_ANALYSIS_MAX_MESSAGES = 1200
+const EMOTION_COMPRESS_BATCH_SIZE = 100
+const EMOTION_MAX_SUMMARY_CHARS = 10000
 let lastForgetCleanupTs = 0
 
 function trimForgetPendingConfirm(now = Date.now()) {
@@ -252,6 +255,28 @@ function trimEmotionCache(map) {
     if (!value || now - (value.ts || 0) > ttl) map.delete(key)
   }
   while (map.size > 200) map.delete(map.keys().next().value)
+}
+
+async function summarizeEmotionMessages(msgs, callOpenAI) {
+  const source = (Array.isArray(msgs) ? msgs : []).slice(-EMOTION_ANALYSIS_MAX_MESSAGES)
+  const summaries = []
+  for (let i = 0; i < source.length; i += EMOTION_COMPRESS_BATCH_SIZE) {
+    const batch = source.slice(i, i + EMOTION_COMPRESS_BATCH_SIZE)
+    const batchText = batch.map(m => `[${m.time}] ${m.user}：${m.content}`).join('\n')
+    try {
+      const summary = await callOpenAI([
+        { role: 'system', content: '你是群聊消息摘要助手。将以下群聊记录压缩成一段100字以内的摘要，保留主要话题和情绪倾向。不要评价，只摘要。不得扩写，不得输出分析报告。' },
+        { role: 'user', content: batchText.slice(0, 4000) },
+      ], false, { _fallbackSet: 'lightweight' })
+      if (summary) summaries.push(summary)
+    } catch {}
+    if (summaries.join('\n---\n').length >= EMOTION_MAX_SUMMARY_CHARS) break
+  }
+  const fallback = source.slice(-80).map(m => `[${m.time}] ${m.user}：${m.content}`).join('\n').slice(0, 8000)
+  return {
+    sample: source,
+    text: (summaries.filter(Boolean).join('\n---\n') || fallback).slice(0, EMOTION_MAX_SUMMARY_CHARS),
+  }
 }
 
 async function handleCommand(session, ctx, state) {
@@ -645,18 +670,8 @@ async function handleCommand(session, ctx, state) {
     if (cached && Date.now() - cached.ts < 300000) return handled(cached.response || cached.text)
     if (cached) lastEmotionCache.delete(channelKey)
 
-    const batchSize = 100
-    const batches = []
-    for (let i = 0; i < msgs.length; i += batchSize) {
-      const batch = msgs.slice(i, i + batchSize)
-      const batchText = batch.map(m => `[${m.time}] ${m.user}：${m.content}`).join('\n')
-      batches.push(callOpenAI([
-        { role: 'system', content: '你是群聊消息摘要助手。将以下群聊记录压缩成一段100字以内的摘要，保留主要话题和情绪倾向。不要评价，只摘要。不得扩写，不得输出分析报告。' },
-        { role: 'user', content: batchText.slice(0, 4000) },
-      ], false, { _fallbackSet: 'lightweight' }).catch(() => ''))
-    }
-    const summaries = await Promise.all(batches)
-    const allSummary = summaries.filter(Boolean).join('\n---\n') || msgs.slice(-80).map(m => `[${m.time}] ${m.user}：${m.content}`).join('\n').slice(0, 8000)
+    const emotionSummary = await summarizeEmotionMessages(msgs, callOpenAI)
+    const allSummary = emotionSummary.text
 
     await loadConfig(true)
     const safeChannelKey = String(channelKey).replace(/[^a-zA-Z0-9._-]/g, '_')

@@ -8,6 +8,7 @@ const fs = require('fs/promises')
 const path = require('path')
 const { DATA_DIR, SKILLS_DIR } = require('../constants')
 const { getReadFileRoots } = require('./config')
+const { resolveAgentPathInput } = require('./workspace-context')
 
 function normalizeAgentPathCase(value) {
   const resolved = path.resolve(String(value || ''))
@@ -36,6 +37,7 @@ function getAgentPathDefaultRoots() {
   const result = []
   pushUniqueRoot(result, process.env.KOISHI_DIR)
   pushUniqueRoot(result, process.cwd())
+  pushUniqueRoot(result, path.resolve(__dirname, '..', '..', '..'))
   pushUniqueRoot(result, path.resolve(__dirname, '..', '..', '..', '..'))
   pushUniqueRoot(result, path.resolve(__dirname, '..', '..'))
   pushUniqueRoot(result, DATA_DIR)
@@ -46,8 +48,7 @@ function getAgentPathDefaultRoots() {
 function mergeConfiguredAndDefaultRoots(roots = []) {
   const result = []
   for (const root of roots) pushUniqueRoot(result, root)
-  pushUniqueRoot(result, DATA_DIR)
-  pushUniqueRoot(result, SKILLS_DIR)
+  for (const root of getAgentPathDefaultRoots()) pushUniqueRoot(result, root)
   return result
 }
 
@@ -64,17 +65,19 @@ async function getAgentPathAllowedRoots() {
 }
 
 async function assertExistingAgentPathInsideRoots(target, label = '路径') {
-  const abs = path.resolve(String(target || ''))
+  const roots = await getAgentPathAllowedRoots()
+  const resolved = resolveAgentPathInput(target, roots, { requireExisting: true })
+  const abs = path.resolve(resolved.path)
   const real = await fs.realpath(abs).catch(() => null)
   if (!real) throw new Error(`${label}不存在：${abs}`)
-  const roots = await getAgentPathAllowedRoots()
   if (!roots.some(root => isAgentPathInside(real, root))) throw new Error(`${label}超出允许范围：${abs}`)
   return { abs, real, roots }
 }
 
 async function assertNewAgentPathInsideRoots(target, label = '路径', createDirectories = false) {
-  const abs = path.resolve(String(target || ''))
   const roots = await getAgentPathAllowedRoots()
+  const resolved = resolveAgentPathInput(target, roots, { requireExisting: false })
+  const abs = path.resolve(resolved.path)
   let parent = path.dirname(abs)
   let realParent = await fs.realpath(parent).catch(() => null)
   if (!realParent && createDirectories) {

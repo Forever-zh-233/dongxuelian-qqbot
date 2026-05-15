@@ -6,6 +6,8 @@ const fs = require('fs/promises')
 const WebSocket = require('ws')
 const { assertExistingAgentPathInsideRoots } = require('../path-guard')
 
+const MAX_SEND_FILE_BYTES = 64 * 1024 * 1024
+
 function callOneBot(action, params, timeoutMs = 5000) {
   return new Promise(resolve => {
     let ws = null
@@ -56,6 +58,7 @@ module.exports = {
     const { abs } = await assertExistingAgentPathInsideRoots(filePath, '文件')
     const stat = await fs.stat(abs)
     if (!stat.isFile()) throw new Error(`不是文件：${filePath}`)
+    if (stat.size > MAX_SEND_FILE_BYTES) throw new Error(`文件过大，拒绝通过 QQ 发送：${stat.size} bytes`)
     const groupId = String(params.groupId || '').trim()
     const userId = String(params.userId || '').trim()
     const name = String(params.name || '').trim() || undefined

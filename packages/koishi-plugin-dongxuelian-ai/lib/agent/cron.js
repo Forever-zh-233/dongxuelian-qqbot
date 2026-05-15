@@ -10,11 +10,14 @@ const { DATA_DIR } = require('../constants')
 const { getAgentConfig } = require('./config')
 
 const CRON_FILE = path.join(DATA_DIR, 'agent-crons.json')
+const MAX_CRON_FILE_BYTES = 512 * 1024
 const timers = new Map()
 let runtime = { bot: null, engine: null }
 
 async function readCronFile() {
   try {
+    const stat = await fsp.stat(CRON_FILE)
+    if (!stat.isFile() || stat.size > MAX_CRON_FILE_BYTES) return { crons: [], history: [] }
     const data = JSON.parse((await fsp.readFile(CRON_FILE, 'utf8')).replace(/^\uFEFF/, ''))
     return { crons: Array.isArray(data.crons) ? data.crons : [], history: Array.isArray(data.history) ? data.history : [] }
   } catch {

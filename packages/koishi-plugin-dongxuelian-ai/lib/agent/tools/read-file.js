@@ -6,6 +6,7 @@ const fs = require('fs/promises')
 const { assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const MAX_FILE_BYTES = 512 * 1024
+const MAX_OUTPUT_CHARS = 30000
 
 module.exports = {
   definition: {
@@ -39,7 +40,9 @@ module.exports = {
     const start = Math.max(0, (parseInt(params.offset, 10) || 1) - 1)
     const end = Math.min(lines.length, start + Math.min(500, parseInt(params.limit, 10) || 200))
 
-    return `文件：${abs}（共 ${lines.length} 行，显示 ${start + 1}-${end} 行）\n${lines.slice(start, end).join('\n')}`
+    const body = lines.slice(start, end).join('\n')
+    const clipped = body.length > MAX_OUTPUT_CHARS ? body.slice(0, MAX_OUTPUT_CHARS) + `\n...(输出截断，共 ${body.length} 字符)` : body
+    return `文件：${abs}（共 ${lines.length} 行，显示 ${start + 1}-${end} 行）\n${clipped}`
   },
   dangerous: false,
   defaultChannels: ['dashboard'],

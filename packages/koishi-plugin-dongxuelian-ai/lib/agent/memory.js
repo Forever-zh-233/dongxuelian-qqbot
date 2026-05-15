@@ -9,6 +9,7 @@ const path = require('path')
 const { DATA_DIR } = require('../constants')
 
 const MEMORY_DIR = path.join(DATA_DIR, 'agent-memory')
+const MAX_MEMORY_FILE_BYTES = 512 * 1024
 
 function safeUserId(userId = '') {
   return String(userId || 'unknown').replace(/[^a-zA-Z0-9_.:-]/g, '_').slice(0, 100) || 'unknown'
@@ -20,7 +21,10 @@ function getMemoryFile(userId) {
 
 async function readMemoryFile(userId) {
   try {
-    const data = JSON.parse((await fsp.readFile(getMemoryFile(userId), 'utf8')).replace(/^\uFEFF/, ''))
+    const file = getMemoryFile(userId)
+    const stat = await fsp.stat(file)
+    if (!stat.isFile() || stat.size > MAX_MEMORY_FILE_BYTES) return { items: [] }
+    const data = JSON.parse((await fsp.readFile(file, 'utf8')).replace(/^\uFEFF/, ''))
     return { items: Array.isArray(data.items) ? data.items : [] }
   } catch {
     return { items: [] }

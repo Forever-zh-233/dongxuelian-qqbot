@@ -7,6 +7,7 @@ const path = require('path')
 const { assertNewAgentPathInsideRoots, assertExistingAgentPathInsideRoots } = require('../path-guard')
 
 const MAX_APPEND_BYTES = 128 * 1024
+const MAX_APPEND_TARGET_BYTES = 2 * 1024 * 1024
 
 module.exports = {
   definition: {
@@ -35,6 +36,7 @@ module.exports = {
     const existing = await fs.stat(abs).catch(() => null)
     if (existing) await assertExistingAgentPathInsideRoots(abs, '路径')
     if (existing && existing.isDirectory()) throw new Error(`目标是目录：${filePath}`)
+    if (existing && existing.size + contentBytes > MAX_APPEND_TARGET_BYTES) throw new Error(`追加后文件过大：${existing.size + contentBytes} bytes，最大 ${MAX_APPEND_TARGET_BYTES} bytes`)
     if (params.createDirectories) await fs.mkdir(path.dirname(abs), { recursive: true })
     await fs.appendFile(abs, params.content, 'utf8')
     return `已追加：${abs}（${contentBytes} bytes）`

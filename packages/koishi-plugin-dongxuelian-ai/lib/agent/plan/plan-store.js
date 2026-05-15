@@ -11,6 +11,14 @@ const { DATA_DIR } = require('../../constants')
 
 const PLAN_DIR = path.join(DATA_DIR, 'agent-plans')
 const ACTIVE_FILE = path.join(PLAN_DIR, 'active.json')
+const MAX_PLAN_FILE_BYTES = parsePlanStorePositiveInt(process.env.DONGXUELIAN_AGENT_PLAN_MAX_BYTES, 512 * 1024, 16 * 1024, 2 * 1024 * 1024)
+const MAX_PLAN_FILES = parsePlanStorePositiveInt(process.env.DONGXUELIAN_AGENT_PLAN_MAX_FILES, 300, 20, 2000)
+
+function parsePlanStorePositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
 
 function safePlanId(id = '') {
   return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)
@@ -66,6 +74,8 @@ function normalizePlan(plan = {}) {
 
 async function readPlanJson(file, fallback) {
   try {
+    const stat = await fsp.stat(file)
+    if (!stat.isFile() || stat.size > MAX_PLAN_FILE_BYTES) return fallback
     return JSON.parse((await fsp.readFile(file, 'utf8')).replace(/^\uFEFF/, ''))
   } catch {
     return fallback
@@ -98,7 +108,7 @@ async function listPlans(limit = 50) {
   let files = []
   try { files = await fsp.readdir(PLAN_DIR) } catch { return [] }
   const plans = []
-  for (const name of files) {
+  for (const name of files.slice(0, MAX_PLAN_FILES)) {
     if (!/^plan_.*\.json$/.test(name)) continue
     const plan = await readPlanJson(path.join(PLAN_DIR, name), null)
     if (plan) plans.push(normalizePlan(plan))

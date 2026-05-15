@@ -18,7 +18,53 @@ let actionQueue = Promise.resolve()
 let screenshotCounter = 0
 let networkLog = []
 let consoleLog = []
-const IDLE_CLOSE_MS = 5 * 60 * 1000
+const IDLE_CLOSE_MS = parseBrowserPositiveInt(process.env.DONGXUELIAN_BROWSER_IDLE_MS, 60 * 1000, 10 * 1000, 5 * 60 * 1000)
+const BROWSER_MIN_AVAILABLE_MB = parseBrowserPositiveInt(process.env.DONGXUELIAN_BROWSER_MIN_MEM_MB, 900, 256, 8192)
+const SEARCH_NAVIGATION_TIMEOUT_MS = 12000
+const SEARCH_SELECTOR_TIMEOUT_MS = 3000
+const MAX_BROWSER_UPLOAD_FILE_BYTES = parseBrowserPositiveInt(process.env.DONGXUELIAN_BROWSER_UPLOAD_MAX_MB, 16, 1, 256) * 1024 * 1024
+const MAX_BROWSER_OUTPUT_FILE_BYTES = parseBrowserPositiveInt(process.env.DONGXUELIAN_BROWSER_OUTPUT_MAX_MB, 24, 1, 256) * 1024 * 1024
+const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media', 'font'])
+const BLOCKED_HOST_RE = /(?:doubleclick|googlesyndication|google-analytics|googletagmanager|adservice|adsystem|bat\.bing|clarity\.ms|facebook\.net|scorecardresearch|cnzz|hm\.baidu|pos\.baidu)/i
+
+function parseBrowserPositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function readLinuxMemAvailableMb() {
+  if (process.platform !== 'linux') return null
+  try {
+    const raw = fs.readFileSync('/proc/meminfo', 'utf8')
+    const match = /^MemAvailable:\s+(\d+)\s+kB/m.exec(raw)
+    return match ? Math.floor(Number(match[1]) / 1024) : null
+  } catch {
+    return null
+  }
+}
+
+function assertEnoughMemoryForBrowser() {
+  if (/^(1|true|yes|on)$/i.test(String(process.env.DONGXUELIAN_BROWSER_FORCE || '').trim())) return
+  const availableMb = readLinuxMemAvailableMb()
+  if (availableMb === null || availableMb >= BROWSER_MIN_AVAILABLE_MB) return
+  throw new Error(`可用内存不足（约 ${availableMb}MB），已拒绝启动 Chromium；需要至少 ${BROWSER_MIN_AVAILABLE_MB}MB。可先释放内存，或确认风险后设置 DONGXUELIAN_BROWSER_FORCE=1。`)
+}
+
+async function enableBrowserRequestGuards(targetPage) {
+  if (!targetPage || typeof targetPage.setRequestInterception !== 'function' || typeof targetPage.on !== 'function') return
+  await targetPage.setRequestInterception(true).catch(() => {})
+  targetPage.on('request', req => {
+    try {
+      const url = req.url()
+      const type = req.resourceType()
+      if (BLOCKED_RESOURCE_TYPES.has(type) || BLOCKED_HOST_RE.test(url)) return req.abort()
+      return req.continue()
+    } catch {
+      try { req.continue() } catch {}
+    }
+  })
+}
 
 function registerCleanup() {
   if (cleanupRegistered) return
@@ -89,16 +135,35 @@ async function validateUrl(raw) {
 }
 
 async function launchPage() {
+  assertEnoughMemoryForBrowser()
   const puppeteer = require('puppeteer-core')
   const executablePath = findBrowser()
   if (!executablePath) throw new Error('未找到 Chrome/Edge/Chromium，请设置 DONGXUELIAN_BROWSER_PATH')
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--disable-default-apps',
+    '--disable-component-update',
+    '--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-renderer-backgrounding',
+    '--js-flags=--max-old-space-size=96',
+  ]
+  if (/^(1|true|yes|on)$/i.test(String(process.env.DONGXUELIAN_BROWSER_SINGLE_PROCESS || '').trim())) launchArgs.push('--single-process')
   browser = await puppeteer.launch({
     executablePath,
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    args: launchArgs,
   })
   registerCleanup()
   page = await browser.newPage()
+  await enableBrowserRequestGuards(page)
   page.on('console', msg => {
     consoleLog.unshift({ type: msg.type(), text: msg.text().slice(0, 300), at: Date.now() })
     if (consoleLog.length > 80) consoleLog.length = 80
@@ -109,7 +174,7 @@ async function launchPage() {
     if (networkLog.length > 120) networkLog.length = 120
   })
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36')
-  await page.setViewport({ width: 1280, height: 800 })
+  await page.setViewport({ width: 1024, height: 700 })
   page.setDefaultTimeout(12000)
   page.setDefaultNavigationTimeout(20000)
   currentUrl = page.url()
@@ -297,9 +362,9 @@ async function searchAndRead(query) {
   for (const searchUrl of urls) {
     try {
       const targetUrl = await validateUrl(searchUrl)
-      await p.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 })
+      await p.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: SEARCH_NAVIGATION_TIMEOUT_MS })
       currentUrl = p.url()
-      await p.waitForSelector('#b_results li.b_algo, .result, .result__body, .web-result, .c-container, [tpl], a[href]', { timeout: 8000 }).catch(() => {})
+      await p.waitForSelector('#b_results li.b_algo, .result, .result__body, .web-result, .c-container, [tpl], a[href]', { timeout: SEARCH_SELECTOR_TIMEOUT_MS }).catch(() => {})
       const extracted = await extractSearchResults(value)
       if (extracted) return extracted
       failures.push(`${new URL(searchUrl).hostname}: 未提取到有效结果`)
@@ -325,6 +390,11 @@ async function takeScreenshot(fullPage = false) {
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, `screenshot-${Date.now()}-${++screenshotCounter}.png`)
   await p.screenshot({ path: file, fullPage: !!fullPage, type: 'png' })
+  const stat = await fs.promises.stat(file).catch(() => null)
+  if (stat && stat.size > MAX_BROWSER_OUTPUT_FILE_BYTES) {
+    await fs.promises.unlink(file).catch(() => {})
+    throw new Error(`截图文件过大：${stat.size} bytes`)
+  }
   return `截图已保存：${file}`
 }
 
@@ -430,6 +500,11 @@ async function savePdf(params = {}) {
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, `page-${Date.now()}-${++screenshotCounter}.pdf`)
   await p.pdf({ path: file, format: 'A4', printBackground: params.printBackground !== false, landscape: !!params.landscape })
+  const stat = await fs.promises.stat(file).catch(() => null)
+  if (stat && stat.size > MAX_BROWSER_OUTPUT_FILE_BYTES) {
+    await fs.promises.unlink(file).catch(() => {})
+    throw new Error(`PDF 文件过大：${stat.size} bytes`)
+  }
   return `PDF 已保存：${file}`
 }
 
@@ -439,7 +514,8 @@ async function manageTabs(action, params = {}) {
   if (action === 'tabs') return JSON.stringify(await Promise.all(pages.map(async (item, index) => ({ index, current: item === p, url: item.url(), title: await item.title().catch(() => '') }))), null, 2)
   if (action === 'new_tab') {
     page = await browser.newPage()
-    await page.setViewport({ width: 1280, height: 800 })
+    await enableBrowserRequestGuards(page)
+    await page.setViewport({ width: 1024, height: 700 })
     currentUrl = page.url()
     if (params.url) return openUrl(params.url)
     return '已打开新标签页'
@@ -493,6 +569,7 @@ async function uploadFile(params = {}) {
     const { abs } = await assertExistingAgentPathInsideRoots(String(item), '上传文件')
     const stat = await fs.promises.stat(abs)
     if (!stat.isFile()) throw new Error(`不是文件：${abs}`)
+    if (stat.size > MAX_BROWSER_UPLOAD_FILE_BYTES) throw new Error(`上传文件过大：${stat.size} bytes`)
     targets.push(abs)
   }
   if (!targets.length) throw new Error('file_upload 需要 path 或 paths')

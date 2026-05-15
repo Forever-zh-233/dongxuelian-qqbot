@@ -17,6 +17,13 @@ const {
   parsePersonaFrontmatter,
 } = require('../persona')
 const { getAgentConfig } = require('./config')
+const MAX_AGENT_PERSONA_FILE_BYTES = parseAgentPersonaPositiveInt(process.env.DONGXUELIAN_AGENT_PERSONA_FILE_MAX_BYTES, 256 * 1024, 8 * 1024, 2 * 1024 * 1024)
+
+function parseAgentPersonaPositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
 
 const AGENT_GUARD_PROMPT = [
   '【Agent 防越狱与人格一致性】',
@@ -33,6 +40,8 @@ function removeAgentFrontmatter(text = '') {
 
 function loadAgentPromptFile(file) {
   try {
+    const stat = fs.statSync(file)
+    if (!stat.isFile() || stat.size > MAX_AGENT_PERSONA_FILE_BYTES) return ''
     const content = fs.readFileSync(file, 'utf8').trim()
     return content ? removeAgentFrontmatter(content) : ''
   } catch {
@@ -51,6 +60,8 @@ function loadAgentNamedPrompt(dir, wantedName, fallbackFile) {
     for (const entry of entries) {
       if (!/^SKILL(\.[^.]+)?\.md$/i.test(entry)) continue
       const file = path.join(dir, entry)
+      const stat = fs.statSync(file)
+      if (!stat.isFile() || stat.size > MAX_AGENT_PERSONA_FILE_BYTES) continue
       const raw = fs.readFileSync(file, 'utf8').trim()
       const meta = parsePersonaFrontmatter(raw)
       const fileName = entry.replace(/^SKILL\.|\.md$/gi, '')
@@ -136,6 +147,8 @@ function listAgentPersonasForConsole() {
     for (const entry of entries) {
       if (!entry.isFile() || !/^SKILL(\.[^.]+)?\.md$/i.test(entry.name)) continue
       const file = path.join(SKILLS_PERSONAS_DIR, entry.name)
+      const stat = fs.statSync(file)
+      if (!stat.isFile() || stat.size > MAX_AGENT_PERSONA_FILE_BYTES) continue
       const content = fs.readFileSync(file, 'utf8').trim()
       const meta = parsePersonaFrontmatter(content)
       if (meta.name) {

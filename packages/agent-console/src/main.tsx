@@ -9,6 +9,8 @@ type ChatMessage = {
   role: 'user' | 'assistant' | 'system'
   content: string
   pendingId?: string
+  id?: string
+  pending?: boolean
 }
 
 const tabs: Array<{ id: TabId; label: string; group: string }> = [
@@ -161,30 +163,53 @@ function Topbar({ onRefresh, loading }: { onRefresh: () => void; loading: boolea
   )
 }
 
-function ChatPage({ refresh }: { refresh: () => void }) {
+function getPersonaHistoryKey(personaName = '') {
+  const key = personaName ? personaName.replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 80) : 'default'
+  return `agent_console_history:${key}`
+}
+
+function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
+  const personaName = persona?.dashboardPersona || ''
+  const historyKey = getPersonaHistoryKey(personaName)
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    try { return JSON.parse(localStorage.getItem('agent_console_history') || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem(historyKey) || '[]') } catch { return [] }
   })
+  const [loadedHistoryKey, setLoadedHistoryKey] = useState(historyKey)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   useEffect(() => {
+    try { setMessages(JSON.parse(localStorage.getItem(historyKey) || '[]')) } catch { setMessages([]) }
+    setLoadedHistoryKey(historyKey)
+  }, [historyKey])
+  useEffect(() => {
+    if (loadedHistoryKey !== historyKey) return
+    localStorage.setItem(historyKey, JSON.stringify(messages.slice(-30)))
     localStorage.setItem('agent_console_history', JSON.stringify(messages.slice(-30)))
-  }, [messages])
+  }, [historyKey, loadedHistoryKey, messages])
   async function send() {
     const text = input.trim()
     if (!text || sending) return
     const history = messages.slice(-12).map(item => ({ role: item.role, content: item.content }))
-    setMessages(prev => [...prev, { role: 'user', content: text }, { role: 'system', content: '执行中...' }])
+    const pendingMessageId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    setMessages(prev => [...prev, { role: 'user', content: text }, { role: 'system', content: '执行中...', id: pendingMessageId, pending: true }])
     setInput('')
     setSending(true)
-    const result = await api.chat(text, history)
-    setMessages(prev => {
-      const base = prev.filter(item => item.content !== '执行中...')
-      const reply = result.ok ? (result.data?.reply || result.data?.result || result.data?.message || '(Agent 未返回内容)') : (result.message || result.data?.message || '请求失败')
-      return [...base, { role: 'assistant', content: reply, pendingId: result.data?.pendingId }]
-    })
-    setSending(false)
-    refresh()
+    try {
+      const result = await api.chat(text, history)
+      setMessages(prev => {
+        const base = prev.filter(item => item.id !== pendingMessageId)
+        const reply = result.ok ? (result.data?.reply || result.data?.result || result.data?.message || '(Agent 未返回内容)') : (result.message || result.data?.message || '请求失败')
+        return [...base, { role: 'assistant', content: reply, pendingId: result.data?.pendingId }]
+      })
+      refresh()
+    } catch (error: any) {
+      setMessages(prev => {
+        const base = prev.filter(item => item.id !== pendingMessageId)
+        return [...base, { role: 'assistant', content: error?.message || '请求失败' }]
+      })
+    } finally {
+      setSending(false)
+    }
   }
   function keyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) send()
@@ -195,6 +220,7 @@ function ChatPage({ refresh }: { refresh: () => void }) {
       <div className="chat-head">
         <h2>新聊天</h2>
         <div className="chat-meta">
+          <span>Console 人格：{personaName || '默认（东雪莲）'}</span>
           <span>当前模型跟随 Dashboard</span>
           <span>工具策略跟随 Agent 配置</span>
         </div>
@@ -346,6 +372,7 @@ function PersonasPage({ personas, persona, setPersona, refresh }: { personas: an
     if (result.ok) {
       setPersona(result.data?.persona || { dashboardPersona: nextName, qqInheritChatPersona: nextInherit })
       setMessage('人格已更新')
+      window.dispatchEvent(new CustomEvent('agent-console-persona-changed', { detail: { dashboardPersona: nextName } }))
       refresh()
     } else {
       setMessage(result.message || result.data?.message || '人格更新失败')
@@ -698,7 +725,7 @@ function App() {
       <main className="workspace">
         <Topbar onRefresh={data.refresh} loading={data.loading} />
         {data.error && <div className="error-banner">{data.error}</div>}
-        {active === 'chat' && <ChatPage refresh={data.refresh} />}
+        {active === 'chat' && <ChatPage refresh={data.refresh} persona={data.persona} />}
         {active === 'inbox' && <InboxPage pending={data.pending} pushLog={data.pushLog} refresh={data.refresh} />}
         {active === 'personas' && <PersonasPage personas={data.personas} persona={data.persona} setPersona={data.setPersona} refresh={data.refresh} />}
         {active === 'files' && <FilesPage roots={data.config?.effectiveReadRoots || []} />}

@@ -1,11 +1,26 @@
 /**
  * MODULE: 联网搜索工具。
- * 优先使用 LLM API 内置搜索，不可用时内部降级到受控浏览器搜索。
+ * 优先使用 LLM API 内置搜索，不可用时降级到轻量 HTTP 搜索；Chromium 兜底需要显式启用。
  */
 const { requestChatCompletions } = require('../../api')
 const { loadConfig } = require('../../runtime-config')
 const { getSearchCapability } = require('../../utils')
 const { buildSearchQueries, isLowQualitySearchResult, getSearchHostname } = require('../search-query')
+const { runHttpSearch } = require('../http-search')
+
+const API_SEARCH_TIMEOUT_MS = 12000
+const BROWSER_SEARCH_QUERY_LIMIT = 2
+const CHROMIUM_SEARCH_ENV = 'DONGXUELIAN_AGENT_BROWSER_SEARCH'
+function searchWithTimeout(promise, timeoutMs, label) {
+  let timer = null
+  return Promise.race([
+    Promise.resolve(promise).finally(() => { if (timer) clearTimeout(timer) }),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(`${label}超时（${timeoutMs}ms）`), timeoutMs)
+      if (timer.unref) timer.unref()
+    }),
+  ])
+}
 
 function hasSearchSourceSignal(text = '') {
   const value = String(text || '')
@@ -38,21 +53,49 @@ function normalizeQueryList(params = {}) {
   }).slice(0, 4)
 }
 
+function isEnvEnabled(name) {
+  return /^(1|true|yes|on)$/i.test(String(process.env[name] || '').trim())
+}
+
+function isBrowserSearchEnabled() {
+  return isEnvEnabled(CHROMIUM_SEARCH_ENV) || isEnvEnabled('DONGXUELIAN_ALLOW_CHROMIUM_SEARCH')
+}
+
 async function browserSearch(queries, reason) {
   const browserAction = require('./browser-action')
   const results = []
-  for (const query of queries) {
-    const result = await browserAction.execute({ action: 'search_and_read', query })
-    results.push(result)
-    if (!/未提取到有效搜索结果|搜索结果质量较低|素材|模板/.test(String(result || ''))) break
+  const failures = []
+  try {
+    for (const query of queries.slice(0, BROWSER_SEARCH_QUERY_LIMIT)) {
+      try {
+        const result = await browserAction.execute({ action: 'search_and_read', query })
+        results.push(result)
+        if (!/未提取到有效搜索结果|搜索结果质量较低|素材|模板/.test(String(result || ''))) break
+      } catch (error) {
+        failures.push(`${query}: ${error.message || String(error)}`)
+        break
+      }
+    }
+  } finally {
+    await browserAction.execute({ action: 'stop' }).catch(() => {})
   }
-  return `${reason}\n${results.join('\n\n---\n')}`
+  if (results.length) return `${reason}\n${results.join('\n\n---\n')}`
+  return `${reason}\nChromium 浏览器搜索失败：${failures.join('\n') || '未返回结果'}`
+}
+
+async function fallbackSearch(queries, reason) {
+  const httpResult = await runHttpSearch(queries)
+  if (httpResult.ok) return `${reason}\n已改用轻量 HTTP 搜索（未启动 Chromium）。\n${httpResult.text}`
+  if (isBrowserSearchEnabled()) {
+    return browserSearch(queries, `${reason}\n轻量 HTTP 搜索未拿到可靠结果，已按 ${CHROMIUM_SEARCH_ENV}=1 启用 Chromium 浏览器兜底。`)
+  }
+  return `${reason}\n${httpResult.text}\n为避免低内存服务器 OOM，web_search 默认跳过 Chromium 浏览器搜索。若确需浏览器兜底，请设置 ${CHROMIUM_SEARCH_ENV}=1，并确保内存充足。`
 }
 
 module.exports = {
   definition: {
     name: 'web_search',
-    description: '联网搜索最新信息。用户问实时新闻、天气、游戏更新、最新资讯时使用；API 搜索不可用时内部降级到受控浏览器搜索。',
+    description: '联网搜索最新信息。用户问实时新闻、天气、游戏更新、最新资讯时使用；API 搜索不可用时内部降级到轻量 HTTP 搜索，默认不会启动 Chromium。',
     parameters: {
       type: 'object',
       properties: {
@@ -71,22 +114,27 @@ module.exports = {
     const capability = getSearchCapability(config)
 
     if (!config.searchEnabled || !capability.supported) {
-      return browserSearch(queries, `API 联网搜索不可用（${capability.label}），已改用受控浏览器搜索。`)
+      return fallbackSearch(queries, `API 联网搜索不可用（${capability.label}）。`)
     }
 
     try {
-      const result = await requestChatCompletions(
-        [{ role: 'user', content: `搜索当前最新信息，不要凭训练数据编造。优先官方或高可信来源，忽略素材/模板/图片下载站。查询：${queries.join('；')}` }],
-        config,
-        { enable_search: true, search_options: { forced_search: true }, max_tokens: 800, _fallbackSet: 'chat' },
+      const result = await searchWithTimeout(
+        requestChatCompletions(
+          [{ role: 'user', content: `搜索当前最新信息，不要凭训练数据编造。优先官方或高可信来源，忽略素材/模板/图片下载站。查询：${queries.join('；')}` }],
+          config,
+          { enable_search: true, search_options: { forced_search: true }, max_tokens: 800, _fallbackSet: 'chat', _timeoutMs: API_SEARCH_TIMEOUT_MS },
+        ),
+        API_SEARCH_TIMEOUT_MS,
+        'API 搜索',
       )
+      if (typeof result === 'string' && /超时/.test(result)) return fallbackSearch(queries, `${result}。`)
       if (result && typeof result === 'string' && !apiSearchLooksUnreliable(result)) return result
-      return browserSearch(queries, 'API 搜索没有返回可靠来源，已改用受控浏览器搜索。')
+      return fallbackSearch(queries, 'API 搜索没有返回可靠来源。')
     } catch (e) {
-      return browserSearch(queries, `API 搜索请求失败：${e.message || '未知错误'}。已改用受控浏览器搜索。`)
+      return fallbackSearch(queries, `API 搜索请求失败：${e.message || '未知错误'}。`)
     }
 
-    return browserSearch(queries, 'API 搜索没有返回可用结果，已改用受控浏览器搜索。')
+    return fallbackSearch(queries, 'API 搜索没有返回可用结果。')
   },
   dangerous: false,
   defaultChannels: ['dashboard', 'qq'],

@@ -16,6 +16,14 @@ const {
   PROVIDERS, MAX_OUTPUT_CHARS_FRIENDLY,
 } = require('./constants')
 const { isAdminUserId } = require('./runtime-config')
+const MAX_TEXT_FILE_BYTES = parseUtilsPositiveInt(process.env.DONGXUELIAN_UTIL_TEXT_MAX_BYTES, 256 * 1024, 4 * 1024, 4 * 1024 * 1024)
+const MAX_JSON_FILE_BYTES = parseUtilsPositiveInt(process.env.DONGXUELIAN_UTIL_JSON_MAX_BYTES, 512 * 1024, 4 * 1024, 8 * 1024 * 1024)
+
+function parseUtilsPositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
 
 function isRareProvocation(text = '') {
   const value = String(text).trim()
@@ -123,7 +131,15 @@ function hasOtherMentions(session) {
 
 function formatPercent(rate = 0) { return `${Number(rate * 100).toFixed(rate * 100 % 1 === 0 ? 0 : 1)}%` }
 
-async function readTextFile(file) { try { return (await require('fs/promises').readFile(file, 'utf8')).trim() } catch { return '' } }
+async function readTextFile(file, options = {}) {
+  try {
+    const fs = require('fs/promises')
+    const maxBytes = Math.max(1, parseInt(options.maxBytes, 10) || MAX_TEXT_FILE_BYTES)
+    const stat = await fs.stat(file)
+    if (!stat.isFile() || stat.size > maxBytes) return ''
+    return (await fs.readFile(file, 'utf8')).trim()
+  } catch { return '' }
+}
 
 async function writeFileAtomic(file, value) {
   const fs = require('fs/promises')
@@ -151,7 +167,15 @@ async function writeFileAtomic(file, value) {
 
 async function writeTextFile(file, value) { await writeFileAtomic(file, String(value)) }
 
-async function readJsonFile(file, fallback) { try { return JSON.parse(await require('fs/promises').readFile(file, 'utf8')) } catch { return fallback } }
+async function readJsonFile(file, fallback, options = {}) {
+  try {
+    const fs = require('fs/promises')
+    const maxBytes = Math.max(1, parseInt(options.maxBytes, 10) || MAX_JSON_FILE_BYTES)
+    const stat = await fs.stat(file)
+    if (!stat.isFile() || stat.size > maxBytes) return fallback
+    return JSON.parse(await fs.readFile(file, 'utf8'))
+  } catch { return fallback }
+}
 
 async function writeJsonFile(file, value) { await writeFileAtomic(file, JSON.stringify(value, null, 2)) }
 

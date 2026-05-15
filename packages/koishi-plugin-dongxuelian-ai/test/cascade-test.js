@@ -436,6 +436,7 @@ async function main() {
   check('npm check includes AI agent engine syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/engine.js'))
   check('npm check includes AI agent config syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/config.js'))
   check('npm check includes AI agent persona context syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/persona-context.js'))
+  check('npm check includes AI agent workspace context syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/workspace-context.js'))
   check('npm check includes AI agent search query syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/search-query.js'))
   check('npm check includes AI agent registry syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/registry.js'))
   check('npm check includes AI read agent skill tool syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/agent/tools/read-agent-skill.js'))
@@ -506,8 +507,10 @@ async function main() {
     agentConfig: path.join(LIB, 'agent', 'config'),
     agentContext: path.join(LIB, 'agent', 'context'),
     agentPersonaContext: path.join(LIB, 'agent', 'persona-context'),
+    agentWorkspaceContext: path.join(LIB, 'agent', 'workspace-context'),
     agentSearchQuery: path.join(LIB, 'agent', 'search-query'),
     agentSearchResults: path.join(LIB, 'agent', 'search-results'),
+    agentHttpSearch: path.join(LIB, 'agent', 'http-search'),
     agentQueue: path.join(LIB, 'agent', 'queue'),
     agentMemory: path.join(LIB, 'agent', 'memory'),
     agentPush: path.join(LIB, 'agent', 'push'),
@@ -670,11 +673,17 @@ async function main() {
     agentPersonaContext: [
       'buildAgentPersonaContext', 'buildAgentPersonaSystemMessage', 'mergeAgentSystemExtra', 'listAgentPersonasForConsole',
     ],
+    agentWorkspaceContext: [
+      'normalizeIntentText', 'normalizeRequestedPath', 'resolveAgentPathInput', 'getWorkspaceSemanticCandidates', 'formatWorkspaceContext', 'buildAgentWorkspaceContext',
+    ],
     agentSearchQuery: [
       'cleanExplicitSearchQuery', 'buildSearchQueries', 'isWuwaLatestRoleQuery', 'getSearchHostname', 'scoreSearchResult', 'isLowQualitySearchResult', 'sortSearchResults',
     ],
     agentSearchResults: [
-      'normalizeResultUrl', 'normalizeSearchCandidate', 'isUsefulSearchResult', 'rankSearchCandidates', 'formatSearchResults', 'buildSearchFailureText',
+      'normalizeResultUrl', 'normalizeSearchCandidate', 'isUsefulSearchResult', 'hasQuerySignal', 'rankSearchCandidates', 'formatSearchResults', 'buildSearchFailureText',
+    ],
+    agentHttpSearch: [
+      'decodeHttpSearchEntities', 'stripHttpSearchTags', 'resolveHttpSearchUrl', 'extractHttpSearchCandidates', 'runHttpSearch',
     ],
     agentQueue: [
       'enqueueAgentTask', 'getAgentQueueStats', 'clearAgentQueue', 'configureAgentQueue', 'resetAgentQueueForTests',
@@ -706,7 +715,7 @@ async function main() {
       'isAgentPathInside', 'getAgentPathAllowedRoots', 'assertExistingAgentPathInsideRoots', 'assertNewAgentPathInsideRoots', 'resolveAgentDefaultRoot',
     ],
     agentSkills: [
-      'listAgentSkills', 'findAgentSkill', 'readAgentSkill', 'parseFrontmatter', 'buildAgentSkillSummary', 'stripFrontmatter',
+      'listAgentSkills', 'findAgentSkill', 'findRelevantAgentSkills', 'readAgentSkill', 'parseFrontmatter', 'buildAgentSkillSummary', 'stripFrontmatter',
     ],
     agentSkillHub: [
       'listSkillHubItems', 'findSkillHubItem', 'setSkillHubEnabled', 'formatSkillHubItems',
@@ -816,8 +825,10 @@ async function main() {
     path.join(LIB, 'agent', 'config.js'),
     path.join(LIB, 'agent', 'context.js'),
     path.join(LIB, 'agent', 'persona-context.js'),
+    path.join(LIB, 'agent', 'workspace-context.js'),
     path.join(LIB, 'agent', 'search-query.js'),
     path.join(LIB, 'agent', 'search-results.js'),
+    path.join(LIB, 'agent', 'http-search.js'),
     path.join(LIB, 'agent', 'queue.js'),
     path.join(LIB, 'agent', 'memory.js'),
     path.join(LIB, 'agent', 'push.js'),
@@ -862,7 +873,7 @@ async function main() {
     runSyntaxCheck(`node -c ${path.relative(ROOT, file)}`, file)
   }
 
-  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/persona-context.js', 'agent/search-query.js', 'agent/search-results.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/read-agent-skill.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
+  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/persona-context.js', 'agent/workspace-context.js', 'agent/search-query.js', 'agent/search-results.js', 'agent/http-search.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/read-agent-skill.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
   const functions = []
   for (const file of duplicateScanFiles) {
     const src = read(path.join(LIB, file))
@@ -1236,8 +1247,19 @@ async function main() {
     { title: '《鸣潮》官方公告 新共鸣者', url: 'https://wutheringwaves.kurogames.com/news/mock?utm_source=x', snippet: '官方公告 新角色 共鸣者' },
   ], '鸣潮 最新角色')
   check('agent search results filters low quality material sites', rankedSearch.length === 1 && rankedSearch[0].url.includes('wutheringwaves.kurogames.com'), JSON.stringify(rankedSearch))
+  const semanticSearch = modules.agentSearchResults.rankSearchCandidates([
+    { title: '鸣潮 3.3 版本前瞻直播回顾', url: 'https://www.bilibili.com/video/mock', snippet: '库洛官方直播公开新共鸣者情报' },
+  ], '鸣潮 最新角色')
+  check('agent search results keeps semantic query matches', semanticSearch.length === 1 && semanticSearch[0].title.includes('版本前瞻'), JSON.stringify(semanticSearch))
   const searchFailureText = modules.agentSearchResults.buildSearchFailureText('我的世界 最新版本', ['bing.com: 未提取到有效结果'])
   check('agent search failure refuses body text fallback', searchFailureText.includes('拒绝把广告、导航、侧栏正文当作搜索事实') && !searchFailureText.includes('当前页面：'), searchFailureText)
+  const httpSearchCandidates = modules.agentHttpSearch.extractHttpSearchCandidates(`
+    <html><body>
+      <a class="result-link" href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fwutheringwaves.kurogames.com%2Fnews%2Fmock%3Futm_source%3Dx">《鸣潮》官方公告 新共鸣者</a>
+      <div class="result-snippet">库洛官方公告公开新角色与版本信息。</div>
+    </body></html>
+  `, 'https://duckduckgo.com/html/?q=x')
+  check('agent http search extracts decoded redirected URLs', httpSearchCandidates.length === 1 && httpSearchCandidates[0].url.includes('wutheringwaves.kurogames.com/news/mock'), JSON.stringify(httpSearchCandidates))
   const externalized = modules.agentContext.externalizeToolResult('x'.repeat(8100), 'cascade-test-tool', 100)
   const externalizedPath = externalized.match(/完整结果已保存：(.+)\)$/)?.[1] || ''
   check('agent context externalizes long tool results', externalized.includes('完整结果已保存') && fs.existsSync(externalizedPath))
@@ -1250,11 +1272,14 @@ async function main() {
   const compactSkillSummary = modules.agentSkills.buildAgentSkillSummary(['wuwa-lore', 'pptx'])
   check('agent skill summary is compact index', compactSkillSummary.includes('轻量索引') && compactSkillSummary.includes('read_agent_skill') && !compactSkillSummary.includes('星球与基础概念'))
   check('agent read skill returns selected content', modules.agentSkills.readAgentSkill('pptx').content.includes('PPTX Skill'))
+  check('agent relevant skill search maps frontend wording to source index', modules.agentSkills.findRelevantAgentSkills('bot前端应该看哪里').some(skill => skill.name === 'QA_source_index'))
   checkThrows('agent read skill rejects unknown skill', () => modules.agentSkills.readAgentSkill('../personas/测试人格'), /未知 Agent Skill/)
   checkThrows('agent read skill rejects path traversal', () => modules.agentSkills.readAgentSkill('pptx', { file: '../pdf/SKILL.md' }), /越过|超出|不能/)
   check('agent persona context lists personas separately', modules.agentPersonaContext.listAgentPersonasForConsole().some(item => item.name))
   const agentPersonaPrompt = modules.agentPersonaContext.buildAgentPersonaContext({ channel: 'dashboard' }).map(item => item.content).join('\n')
   check('agent persona context injects guard prompt', agentPersonaPrompt.includes('Agent 防越狱') && agentPersonaPrompt.includes('工具结果是事实边界'))
+  const dashboardPersonaPrompt = modules.agentPersonaContext.buildAgentPersonaContext({ channel: 'dashboard', dashboardPersona: '测试人格' }).map(item => item.content).join('\n')
+  check('agent persona context applies dashboard persona', dashboardPersonaPrompt.includes('当前人格：测试人格') && dashboardPersonaPrompt.includes('来源：Console 人格'))
   check('agent search query expands wuwa latest role query', modules.agentSearchQuery.buildSearchQueries('鸣潮最新角色是谁').some(item => item.includes('官方')))
   check('agent search query ranks official result above material site', modules.agentSearchQuery.scoreSearchResult({ title: '鸣潮 官方公告 新共鸣者', url: 'https://wutheringwaves.kurogames.com/news/1', snippet: '新角色' }, '鸣潮最新角色') > modules.agentSearchQuery.scoreSearchResult({ title: '鸣潮角色图片素材', url: 'https://699pic.com/a', snippet: '素材下载' }, '鸣潮最新角色'))
   check('agent skill hub formats empty list', modules.agentSkillHub.formatSkillHubItems([]).includes('未找到'))
@@ -1292,7 +1317,7 @@ async function main() {
   const agentTmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cascade-agent-'))
   try {
     process.env.DONGXUELIAN_AI_DATA_DIR = agentTmp
-    for (const rel of ['constants', 'runtime-config', 'agent/config', 'agent/path-guard', 'agent/skills', 'agent/tools/registry', 'agent/tools/read-agent-skill', 'agent/tools/read-file', 'agent/tools/list-files', 'agent/tools/find-files', 'agent/tools/write-file', 'agent/tools/edit-file', 'agent/tools/append-file', 'agent/tools/grep-search', 'agent/tools/execute-javascript', 'agent/tools/get-token-usage', 'agent/tools/set-user-timezone', 'agent/tools/query-logs', 'agent/tools/web-search', 'agent/tools/browser-action', 'agent/pending', 'agent/safety', 'agent/stats']) {
+    for (const rel of ['constants', 'runtime-config', 'agent/config', 'agent/workspace-context', 'agent/path-guard', 'agent/skills', 'agent/http-search', 'agent/tools/registry', 'agent/tools/read-agent-skill', 'agent/tools/read-file', 'agent/tools/list-files', 'agent/tools/find-files', 'agent/tools/write-file', 'agent/tools/edit-file', 'agent/tools/append-file', 'agent/tools/grep-search', 'agent/tools/execute-javascript', 'agent/tools/get-token-usage', 'agent/tools/set-user-timezone', 'agent/tools/query-logs', 'agent/tools/web-search', 'agent/tools/browser-action', 'agent/pending', 'agent/safety', 'agent/stats']) {
       delete require.cache[require.resolve(path.join(LIB, rel))]
     }
     const isolatedConstants = require(path.join(LIB, 'constants'))
@@ -1380,19 +1405,45 @@ async function main() {
     check('agent get_token_usage returns stats', (await isolatedGetTokenUsage.execute({})).includes('累计调用'))
     check('agent set_user_timezone stores preference', (await isolatedSetUserTimezone.execute({ userId: 'u1', timezone: 'Asia/Shanghai' })).includes('Asia/Shanghai'))
     try {
+      const mockSearchHtml = `
+        <html><body>
+          <a class="result-link" href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fwutheringwaves.kurogames.com%2Fnews%2Fmock">《鸣潮》官方公告 新共鸣者</a>
+          <div class="result-snippet">库洛官方公告公开新角色与版本信息。</div>
+        </body></html>
+      `
+      const originalFetchForWebSearch = global.fetch
+      const originalBrowserSearchEnv = process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH
+      const originalAllowChromiumEnv = process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH
+      delete process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH
+      delete process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH
+      try {
+        const httpSearchUrls = []
+        global.fetch = async (url) => {
+          httpSearchUrls.push(String(url))
+          return {
+            ok: true,
+            async text() { return mockSearchHtml },
+          }
+        }
       const webFallback = await isolatedWebSearch.execute({ query: '鸣潮 最新角色' })
-      check('agent web_search falls back to browser search when API search unavailable', typeof webFallback === 'string' && webFallback.includes('受控浏览器搜索') && webFallback.includes('已搜索'))
-      check('agent web_search uses planned browser query candidates', browserSearchCalls.some(item => String(item.query || '').includes('官方')))
+        check('agent web_search falls back to lightweight HTTP when API search unavailable', typeof webFallback === 'string' && webFallback.includes('轻量 HTTP 搜索') && webFallback.includes('未启动 Chromium') && webFallback.includes('已搜索'))
+        check('agent web_search uses planned HTTP query candidates', httpSearchUrls.some(url => decodeURIComponent(url).includes('官方')))
+        check('agent web_search skips browser fallback by default', browserSearchCalls.length === 0)
       fs.writeFileSync(isolatedConstants.PROVIDER_FILE, 'dashscope')
       fs.writeFileSync(isolatedConstants.MODEL_FILE, 'qwen3.5-plus')
       fs.writeFileSync(isolatedConstants.DASHSCOPE_KEY_FILE, 'test-key')
       fs.writeFileSync(isolatedConstants.SEARCH_ENABLED_FILE, 'true')
       isolatedRuntimeConfig.resetConfigCache()
-      const originalFetchForWebSearch = global.fetch
-      try {
         const searchBodies = []
         browserSearchCalls.length = 0
         global.fetch = async (url, options = {}) => {
+          if (String(options.method || 'GET').toUpperCase() !== 'POST') {
+            httpSearchUrls.push(String(url))
+            return {
+              ok: true,
+              async text() { return mockSearchHtml },
+            }
+          }
           searchBodies.push(JSON.parse(options.body || '{}'))
           return {
             ok: true,
@@ -1402,21 +1453,36 @@ async function main() {
           }
         }
         const unreliableApiFallback = await isolatedWebSearch.execute({ query: '鸣潮最新角色是谁' })
-        check('agent web_search falls back when API search has no source signal', unreliableApiFallback.includes('API 搜索没有返回可靠来源') && unreliableApiFallback.includes('已搜索'))
+        check('agent web_search falls back to HTTP when API search has no source signal', unreliableApiFallback.includes('API 搜索没有返回可靠来源') && unreliableApiFallback.includes('轻量 HTTP 搜索') && unreliableApiFallback.includes('已搜索'))
         check('agent web_search sends planned official-first queries to API search', searchBodies[0]?.messages?.[0]?.content.includes('官方') && searchBodies[0].messages[0].content.includes('忽略素材/模板/图片下载站'))
-        check('agent web_search browser fallback runs after unreliable API result', browserSearchCalls.length > 0)
+        check('agent web_search does not run browser fallback after unreliable API result by default', browserSearchCalls.length === 0)
 
         browserSearchCalls.length = 0
-        global.fetch = async () => ({
-          ok: true,
-          async json() {
-            return { choices: [{ message: { content: '来源：https://wutheringwaves.kurogames.com/news/mock 官方公告显示，鸣潮将公开新共鸣者信息。' } }] }
-          },
-        })
+        global.fetch = async (url, options = {}) => {
+          if (String(options.method || 'GET').toUpperCase() !== 'POST') throw new Error('reliable API result should not call HTTP search')
+          return {
+            ok: true,
+            async json() {
+              return { choices: [{ message: { content: '来源：https://wutheringwaves.kurogames.com/news/mock 官方公告显示，鸣潮将公开新共鸣者信息。' } }] }
+            },
+          }
+        }
         const reliableApiResult = await isolatedWebSearch.execute({ query: '鸣潮最新角色是谁' })
         check('agent web_search accepts API result with reliable source signal', reliableApiResult.includes('wutheringwaves.kurogames.com') && browserSearchCalls.length === 0)
+
+        fs.writeFileSync(isolatedConstants.SEARCH_ENABLED_FILE, 'false')
+        isolatedRuntimeConfig.resetConfigCache()
+        process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH = '1'
+        browserSearchCalls.length = 0
+        global.fetch = async () => { throw new Error('mock http search down') }
+        const browserEnabledFallback = await isolatedWebSearch.execute({ query: '鸣潮最新角色是谁' })
+        check('agent web_search only runs browser fallback when explicitly enabled', browserEnabledFallback.includes('Chromium 浏览器兜底') && browserSearchCalls.some(item => item.action === 'search_and_read'))
       } finally {
         global.fetch = originalFetchForWebSearch
+        if (originalBrowserSearchEnv === undefined) delete process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH
+        else process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH = originalBrowserSearchEnv
+        if (originalAllowChromiumEnv === undefined) delete process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH
+        else process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH = originalAllowChromiumEnv
       }
     } finally {
       isolatedBrowserAction.execute = originalBrowserActionExecute
@@ -1617,6 +1683,7 @@ async function main() {
   check('dashboard agent panel manages tools and skills', dashboardAgentPanelSrc.includes('fetchAgentConfig') && dashboardAgentPanelSrc.includes('Skill 索引') && dashboardAgentPanelSrc.includes('read_agent_skill'))
   check('dashboard agent panel exposes skill selection', dashboardAgentPanelSrc.includes('config.enabledSkills') && dashboardAgentPanelSrc.includes(':value="skill.name"'))
   check('dashboard agent panel exposes read roots', dashboardAgentPanelSrc.includes('文件读取根目录') && dashboardAgentPanelSrc.includes('config.readFileRoots'))
+  check('dashboard agent panel exposes persona switch', dashboardAgentPanelSrc.includes('Console 人格') && dashboardAgentPanelSrc.includes('fetchAgentPersonas') && dashboardAgentPanelSrc.includes('saveAgentPersona'))
   check('dashboard agent panel stores local chat history', dashboardAgentPanelSrc.includes('dashboard_agent_history') && dashboardAgentPanelSrc.includes('history.value'))
   check('dashboard agent panel exposes pending confirmation', dashboardAgentPanelSrc.includes('confirmAgentTool') && dashboardAgentPanelSrc.includes('pendingTools') && dashboardAgentPanelSrc.includes('argsSummary'))
   check('dashboard agent panel prompts admin for chat and confirm', dashboardAgentPanelSrc.includes('isAdminRequired') && dashboardAgentPanelSrc.includes('使用 Dashboard Agent 需要管理员密码') && dashboardAgentPanelSrc.includes('确认 Agent 工具需要管理员密码'))
@@ -1626,6 +1693,7 @@ async function main() {
   const agentConsoleSrc = fs.existsSync(path.join(PKG_ROOT, 'agent-console', 'src', 'main.tsx')) ? read(path.join(PKG_ROOT, 'agent-console', 'src', 'main.tsx')) : ''
   check('agent console exposes runtime config page', agentConsoleSrc.includes("id: 'runtime'") && agentConsoleSrc.includes('function RuntimePage') && agentConsoleSrc.includes('queue.maxGlobal'))
   check('agent console exposes persona page separate from skills', agentConsoleSrc.includes("id: 'personas'") && agentConsoleSrc.includes('function PersonasPage') && agentConsoleSrc.includes('api.savePersona'))
+  check('agent console isolates history by persona', agentConsoleSrc.includes('getPersonaHistoryKey') && agentConsoleSrc.includes('Console 人格：'))
   check('agent console can enable skills from skill page', agentConsoleSrc.includes('function SkillsPage') && agentConsoleSrc.includes('next.enabledSkills') && agentConsoleSrc.includes('注入轻量索引'))
   check('dashboard exposes deterministic plan action APIs', dashboardStandalone.includes("/dashboard/api/agent/plans") && dashboardStandalone.includes("/resume") && dashboardStandalone.includes("/abandon") && dashboardStandalone.includes("plan', 'plan-runner"))
   check('dashboard plan create obeys plan mode switch', dashboardStandalone.includes("agent', 'config") && dashboardStandalone.includes('agentConfig.planMode?.enabled') && dashboardStandalone.includes('计划模式当前未开启'))
@@ -1640,6 +1708,10 @@ async function main() {
   check('browser action exposes snapshot action', browserActionSrc.includes("'snapshot'") && browserActionSrc.includes('getSnapshot'))
   check('browser action exposes guarded interaction actions', browserActionSrc.includes("'click'") && browserActionSrc.includes('requireSelector') && browserActionSrc.includes("'screenshot'"))
   check('browser action exposes phase3 browser actions', browserActionSrc.includes("'evaluate'") && browserActionSrc.includes("'batch'") && browserActionSrc.includes("'pdf'") && browserActionSrc.includes("'drag'") && browserActionSrc.includes("'file_upload'") && browserActionSrc.includes("'clear_cache'"))
+  check('browser action has Chromium memory launch guard', browserActionSrc.includes('MemAvailable') && browserActionSrc.includes('DONGXUELIAN_BROWSER_MIN_MEM_MB') && browserActionSrc.includes('assertEnoughMemoryForBrowser'))
+  check('browser action blocks heavy browser resources', browserActionSrc.includes('setRequestInterception') && browserActionSrc.includes('BLOCKED_RESOURCE_TYPES') && browserActionSrc.includes("'image'") && browserActionSrc.includes("'media'"))
+  const webSearchSrc = read(path.join(LIB, 'agent', 'tools', 'web-search.js'))
+  check('web_search defaults away from Chromium fallback', webSearchSrc.includes('DONGXUELIAN_AGENT_BROWSER_SEARCH') && webSearchSrc.includes('轻量 HTTP 搜索') && webSearchSrc.includes('默认跳过 Chromium'))
   check('dashboard agent panel exposes auto route switch', dashboardAgentPanelSrc.includes('QQ 自动路由') && dashboardAgentPanelSrc.includes('config.autoRoute.qq.enabled'))
   check('dashboard rejects missing access password', dashboardStandalone.includes('access password is not configured'))
   check('restart-bot uses local koishi binary', restartBot.includes('node "$APP_DIR/node_modules/koishi/bin.js" start'))
@@ -1687,6 +1759,17 @@ async function main() {
   const chatSrc = read(path.join(LIB, 'chat.js'))
   const utilsSrc = read(path.join(LIB, 'utils.js'))
   const msgSrc = read(path.join(LIB, 'message-reader.js'))
+  const dashboardStandaloneSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'standalone.js'))
+  const dailyRendererSrc = read(path.join(PKG_ROOT, 'koishi-plugin-daily-report', 'lib', 'html-renderer.js'))
+  const dailyCollectorSrc = read(path.join(PKG_ROOT, 'koishi-plugin-daily-report', 'lib', 'data-collector.js'))
+  const dailyAnalyzerSrc = read(path.join(PKG_ROOT, 'koishi-plugin-daily-report', 'lib', 'ai-analyzer.js'))
+  const agentPushSrc = read(path.join(LIB, 'agent', 'push.js'))
+  const skillsLoaderSrc = read(path.join(LIB, 'skills-loader.js'))
+  const personaSrc = read(path.join(LIB, 'persona.js'))
+  const agentPersonaSrc = read(path.join(LIB, 'agent', 'persona-context.js'))
+  const agentConfigSrc = read(path.join(LIB, 'agent', 'config.js'))
+  const agentCronSrc = read(path.join(LIB, 'agent', 'cron.js'))
+  const agentMemorySrc = read(path.join(LIB, 'agent', 'memory.js'))
   // conversation.js 现需 DATA_DIR 用于 memory-timers (群记忆定时清空) 的路径构造
   check('conversation.js does not import POLITICAL_DETECT_FILE', !conversationSrc.includes('POLITICAL_DETECT_FILE'))
   check('conversation.js does not import index.js', !conversationSrc.includes("require('./index')") && !conversationSrc.includes('require("./index")'))
@@ -1700,6 +1783,18 @@ async function main() {
   check('index.js does not install content-based session.text fallback', !indexSrc.includes('prototype.text') || indexSrc.includes('.i18n('))
   check('index.js does not reference patch preload env', !indexSrc.includes('DONGXUELIAN_KOISHI_PATCH') && !indexSrc.includes('NODE_OPTIONS'))
   check('chat.js keeps block-scoped declarations', !/\bvar\b/.test(chatSrc))
+  check('dashboard hashes large files with bounded chunks', dashboardStandaloneSrc.includes('HASH_CHUNK_BYTES') && dashboardStandaloneSrc.includes('fs.readSync') && !dashboardStandaloneSrc.includes("crypto.createHash('sha256').update(fs.readFileSync(filePath))"))
+  check('dashboard limits request/download/static/log/preview sizes', dashboardStandaloneSrc.includes('EFFECTIVE_MAX_BODY_SIZE') && dashboardStandaloneSrc.includes('MAX_DOWNLOAD_BYTES') && dashboardStandaloneSrc.includes('MAX_STATIC_FILE_BYTES') && dashboardStandaloneSrc.includes('MAX_DEPLOY_TASK_LOG_BYTES') && dashboardStandaloneSrc.includes('MAX_AGENT_PREVIEW_FILE_BYTES'))
+  check('dashboard limits upload and gallery metadata memory', dashboardStandaloneSrc.includes('MAX_DEPLOY_UPLOAD_BYTES') && dashboardStandaloneSrc.includes('MAX_GALLERY_METADATA_BYTES') && dashboardStandaloneSrc.includes('estimatedBytes'))
+  check('dashboard streams file responses', dashboardStandaloneSrc.includes('fs.createReadStream(abs).pipe(res)') && dashboardStandaloneSrc.includes('fs.createReadStream(filePath).pipe(res)'))
+  check('daily report renderer guards Chromium memory', dailyRendererSrc.includes('DAILY_REPORT_MIN_MEM_MB') && dailyRendererSrc.includes('MemAvailable') && dailyRendererSrc.includes('MAX_RENDERERS') && dailyRendererSrc.includes('BLOCKED_RESOURCE_TYPES'))
+  check('daily report collector caps source file and analysis messages', dailyCollectorSrc.includes('MAX_CACHE_FILE_BYTES') && dailyCollectorSrc.includes('MAX_ANALYSIS_MESSAGES') && dailyCollectorSrc.includes('truncatedMessages'))
+  check('daily report analyzer compresses sequential capped batches', dailyAnalyzerSrc.includes('MAX_COMPRESS_BATCHES') && dailyAnalyzerSrc.includes('MAX_COMPRESSED_CHARS') && !dailyAnalyzerSrc.includes('Promise.allSettled(batches)'))
+  check('conversation runtime data files have size guards', conversationSrc.includes('MAX_CONVERSATION_FILE_BYTES') && conversationSrc.includes('MAX_USER_PROFILE_FILE_BYTES') && conversationSrc.includes('MAX_DAILY_STATS_FILE_BYTES') && conversationSrc.includes('readJsonFileIfSmallSync'))
+  check('utils shared file readers have default size guards', utilsSrc.includes('MAX_TEXT_FILE_BYTES') && utilsSrc.includes('MAX_JSON_FILE_BYTES') && utilsSrc.includes('fs.stat(file)'))
+  check('agent push log is tail-read and compacted', agentPushSrc.includes('MAX_PUSH_LOG_READ_BYTES') && agentPushSrc.includes('MAX_PUSH_LOG_FILE_BYTES') && agentPushSrc.includes('Math.max(0, stat.size - readBytes)'))
+  check('skill/persona loaders skip oversized markdown', skillsLoaderSrc.includes('MAX_SKILL_FILE_BYTES') && personaSrc.includes('MAX_PERSONA_SKILL_BYTES') && agentPersonaSrc.includes('MAX_AGENT_PERSONA_FILE_BYTES'))
+  check('agent config cron memory files have size guards', agentConfigSrc.includes('MAX_TOOL_CONFIG_BYTES') && agentCronSrc.includes('MAX_CRON_FILE_BYTES') && agentMemorySrc.includes('MAX_MEMORY_FILE_BYTES'))
   const libJsFiles = []
   function collectLibJsFiles(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

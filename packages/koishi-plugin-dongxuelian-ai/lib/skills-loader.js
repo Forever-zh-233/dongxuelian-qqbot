@@ -14,6 +14,19 @@ const { isDebugLogEnabled } = require('./logging-config')
 
 let skillsCache = []
 let skillsContentCache = {}
+const MAX_SKILL_FILE_BYTES = parseSkillPositiveInt(process.env.DONGXUELIAN_SKILL_FILE_MAX_BYTES, 256 * 1024, 8 * 1024, 2 * 1024 * 1024)
+
+function parseSkillPositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+async function readSkillTextIfSmall(file) {
+  const stat = await fs.stat(file).catch(() => null)
+  if (!stat || !stat.isFile() || stat.size > MAX_SKILL_FILE_BYTES) return ''
+  return (await fs.readFile(file, 'utf8')).trim()
+}
 
 function shouldInjectLore(userText = '') {
   for (const keyword of LORE_TRIGGER_SET) {
@@ -48,7 +61,7 @@ async function loadSkills() {
       }
       if (!/^SKILL(\.[^.]+)?\.md$/i.test(entry.name)) continue
       try {
-        const content = (await fs.readFile(fullPath, 'utf8')).trim()
+        const content = await readSkillTextIfSmall(fullPath)
         if (content) skills.push(content)
       } catch (e) {
         if (isDebugLogEnabled('skills')) console.warn(`[dongxuelian-ai] skill load failed: ${path.basename(fullPath)} ${e.message}`)
@@ -68,7 +81,8 @@ async function loadSkillsContentCache() {
     for (const entry of entries) {
       if (!/^SKILL\.(.+)\.md$/i.test(entry)) continue
       const name = entry.match(/^SKILL\.(.+)\.md$/i)[1]
-      cache['core:' + name] = (await fs.readFile(path.join(SKILLS_CORE_DIR, entry), 'utf8')).trim().replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
+      const content = await readSkillTextIfSmall(path.join(SKILLS_CORE_DIR, entry))
+      if (content) cache['core:' + name] = content.replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
     }
   } catch {}
   try {
@@ -76,7 +90,8 @@ async function loadSkillsContentCache() {
     for (const entry of entries) {
       if (!/^SKILL\.(.+)\.md$/i.test(entry)) continue
       const name = entry.match(/^SKILL\.(.+)\.md$/i)[1]
-      cache['mode:' + name] = (await fs.readFile(path.join(SKILLS_MODES_DIR, entry), 'utf8')).trim().replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
+      const content = await readSkillTextIfSmall(path.join(SKILLS_MODES_DIR, entry))
+      if (content) cache['mode:' + name] = content.replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
     }
   } catch {}
   try {
@@ -84,7 +99,8 @@ async function loadSkillsContentCache() {
     for (const entry of entries) {
       if (!/^SKILL\.(.+)\.md$/i.test(entry)) continue
       const name = entry.match(/^SKILL\.(.+)\.md$/i)[1]
-      cache['lore:' + name] = (await fs.readFile(path.join(SKILLS_LORE_DIR, entry), 'utf8')).trim().replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
+      const content = await readSkillTextIfSmall(path.join(SKILLS_LORE_DIR, entry))
+      if (content) cache['lore:' + name] = content.replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
     }
   } catch {}
   skillsContentCache = cache

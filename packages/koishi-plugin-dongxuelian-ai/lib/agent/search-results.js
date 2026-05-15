@@ -44,15 +44,26 @@ function getQueryTerms(query = '') {
     .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
     .split(/\s+/)
     .map(item => item.trim())
-    .filter(item => item.length >= 2)
+    .filter(item => item.length >= 2 && !/^(最新|当前|现在|是谁|什么|怎么|一下|查询|搜索|官方)$/.test(item))
     .slice(0, 8)
+}
+
+function hasTrustedSearchSignal(item = {}, query = '') {
+  const haystack = `${item.title || ''}\n${item.snippet || ''}\n${item.text || ''}\n${item.url || ''}`
+  if (/鸣潮|wuthering\s*waves|wutheringwaves|kuro|库洛/i.test(query)) {
+    return /鸣潮|wuthering\s*waves|wutheringwaves|kuro|库洛|共鸣者|角色|版本|前瞻|公告/i.test(haystack)
+  }
+  if (/minecraft|我的世界|mojang/i.test(query)) {
+    return /minecraft|我的世界|mojang|release|version|update|snapshot/i.test(haystack)
+  }
+  return false
 }
 
 function hasQuerySignal(item = {}, query = '') {
   const terms = getQueryTerms(query)
   if (!terms.length) return true
   const haystack = `${item.title || ''}\n${item.snippet || ''}\n${item.text || ''}\n${item.url || ''}`.toLowerCase()
-  return terms.some(term => haystack.includes(term.toLowerCase()))
+  return terms.some(term => haystack.includes(term.toLowerCase())) || hasTrustedSearchSignal(item, query)
 }
 
 function normalizeSearchCandidate(item = {}) {
@@ -111,6 +122,7 @@ module.exports = {
   normalizeResultUrl,
   normalizeSearchCandidate,
   isUsefulSearchResult,
+  hasQuerySignal,
   rankSearchCandidates,
   formatSearchResults,
   buildSearchFailureText,

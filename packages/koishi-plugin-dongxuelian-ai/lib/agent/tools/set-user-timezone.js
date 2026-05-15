@@ -8,9 +8,15 @@ const { DATA_DIR } = require('../../constants')
 
 const TZ_FILE = path.join(DATA_DIR, 'agent-user-timezones.json')
 const TZ_RE = /^[A-Za-z]+(?:[ _-][A-Za-z]+)*(?:\/[A-Za-z0-9_+.-]+)+$/
+const MAX_TZ_FILE_BYTES = 128 * 1024
+const MAX_TZ_ENTRIES = 2000
 
 async function readMap() {
-  try { return JSON.parse(await fs.readFile(TZ_FILE, 'utf8')) } catch { return {} }
+  try {
+    const stat = await fs.stat(TZ_FILE)
+    if (!stat.isFile() || stat.size > MAX_TZ_FILE_BYTES) return {}
+    return JSON.parse(await fs.readFile(TZ_FILE, 'utf8'))
+  } catch { return {} }
 }
 
 module.exports = {
@@ -33,8 +39,10 @@ module.exports = {
     const userId = String(params.userId || 'dashboard').trim() || 'dashboard'
     const data = await readMap()
     data[userId] = timezone
+    const entries = Object.entries(data).slice(-MAX_TZ_ENTRIES)
+    const next = Object.fromEntries(entries)
     await fs.mkdir(path.dirname(TZ_FILE), { recursive: true })
-    await fs.writeFile(TZ_FILE, JSON.stringify(data, null, 2), 'utf8')
+    await fs.writeFile(TZ_FILE, JSON.stringify(next, null, 2), 'utf8')
     return `已设置用户 ${userId} 的时区：${timezone}`
   },
   dangerous: false,

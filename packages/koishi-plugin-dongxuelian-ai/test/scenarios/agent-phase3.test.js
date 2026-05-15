@@ -25,6 +25,41 @@ async function run(t) {
     t.check('browser action exposes phase3 action: ' + name, browserActions.includes(name))
   }
 
+  const workspaceContext = require('../../lib/agent/workspace-context')
+  const repoRoot = require('path').resolve(__dirname, '..', '..', '..', '..')
+  const frontCandidates = workspaceContext.getWorkspaceSemanticCandidates('bot前端agent权限低', [repoRoot])
+  t.check('workspace semantic maps bot frontend to agent console', frontCandidates.some(item => item.path.endsWith(require('path').join('packages', 'agent-console'))), JSON.stringify(frontCandidates))
+  const dashboardResolved = workspaceContext.resolveAgentPathInput('dashboard文件夹', [repoRoot], { requireExisting: true })
+  t.check('workspace path alias resolves dashboard folder', dashboardResolved.path.endsWith(require('path').join('packages', 'koishi-plugin-dashboard')), dashboardResolved.path)
+  const workspaceExtra = await workspaceContext.buildAgentWorkspaceContext({ userMessage: 'bot前端怎么改', channel: 'dashboard', roots: [repoRoot] })
+  t.check('workspace context injects dashboard guidance', workspaceExtra[0]?.content.includes('bot前端') && workspaceExtra[0]?.content.includes('packages/agent-console'))
+
+  const originalDataDirForPersona = process.env.DONGXUELIAN_AI_DATA_DIR
+  const personaTmp = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'agent-dashboard-persona-'))
+  process.env.DONGXUELIAN_AI_DATA_DIR = personaTmp
+  for (const rel of ['constants', 'persona', 'agent/config', 'agent/persona-context']) {
+    delete require.cache[require.resolve('../../lib/' + rel)]
+  }
+  try {
+    require('fs').mkdirSync(require('path').join(personaTmp, 'ai-skills', 'core'), { recursive: true })
+    require('fs').mkdirSync(require('path').join(personaTmp, 'ai-skills', 'modes'), { recursive: true })
+    require('fs').mkdirSync(require('path').join(personaTmp, 'ai-skills', 'personas'), { recursive: true })
+    require('fs').writeFileSync(require('path').join(personaTmp, 'ai-skills', 'core', 'SKILL.persona-core.md'), '---\nname: persona-core\n---\nDASHBOARD_CORE_MARKER', 'utf8')
+    require('fs').writeFileSync(require('path').join(personaTmp, 'ai-skills', 'personas', 'SKILL.dashboard-persona.md'), '---\nname: Console测试人格\ndescription: dashboard persona\n---\nDASHBOARD_PERSONA_MARKER', 'utf8')
+    const config = require('../../lib/agent/config')
+    await config.patchAgentConfig({ persona: { dashboardPersona: 'Console测试人格', qqInheritChatPersona: true } })
+    const personaContext = require('../../lib/agent/persona-context')
+    const prompt = personaContext.buildAgentPersonaContext({ channel: 'dashboard' }).map(item => item.content).join('\n')
+    t.check('dashboard agent uses saved console persona', prompt.includes('当前人格：Console测试人格') && prompt.includes('DASHBOARD_PERSONA_MARKER') && prompt.includes('来源：Console 人格'), prompt)
+  } finally {
+    for (const rel of ['constants', 'persona', 'agent/config', 'agent/persona-context']) {
+      delete require.cache[require.resolve('../../lib/' + rel)]
+    }
+    if (originalDataDirForPersona) process.env.DONGXUELIAN_AI_DATA_DIR = originalDataDirForPersona
+    else delete process.env.DONGXUELIAN_AI_DATA_DIR
+    try { require('fs').rmSync(personaTmp, { recursive: true, force: true }) } catch {}
+  }
+
   const queue = require('../../lib/agent/queue')
   queue.resetAgentQueueForTests()
   queue.configureAgentQueue({ maxGlobal: 1, maxPerChannel: 2, maxPendingPerUser: 1, timeoutMs: 5000 })

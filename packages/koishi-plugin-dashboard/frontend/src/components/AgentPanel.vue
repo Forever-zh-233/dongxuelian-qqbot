@@ -86,6 +86,24 @@
     </div>
 
     <div class="section-head">
+      <h3>Console 人格</h3>
+      <span class="muted">{{ currentDashboardPersona || '默认（东雪莲）' }}</span>
+    </div>
+    <div class="grid">
+      <label class="field">
+        <span>Dashboard Agent 人格</span>
+        <select v-model="persona.dashboardPersona" :disabled="savingPersona" @change="savePersona">
+          <option value="">默认（东雪莲）</option>
+          <option v-for="item in personas" :key="item.name" :value="item.name">{{ item.name }}</option>
+        </select>
+      </label>
+      <label class="switch-row">
+        <input v-model="persona.qqInheritChatPersona" type="checkbox" :disabled="savingPersona" @change="savePersona" />
+        <span>QQ 继承聊天人格</span>
+      </label>
+    </div>
+
+    <div class="section-head">
       <h3>Dashboard Agent 测试</h3>
       <span class="muted">累计调用 {{ stats.total || 0 }} 次 · QQ {{ stats.byChannel?.qq || 0 }} / Dashboard {{ stats.byChannel?.dashboard || 0 }}</span>
     </div>
@@ -158,7 +176,7 @@
 
 <script>
 import { computed, inject, onMounted, reactive, ref } from 'vue'
-import { fetchAgentConfig, saveAgentConfig, sendAgentMessage, confirmAgentTool, rejectAgentTool, fetchPendingAgentTools, fetchAgentSessions, fetchAgentSession } from '../api'
+import { fetchAgentConfig, saveAgentConfig, fetchAgentPersonas, saveAgentPersona, sendAgentMessage, confirmAgentTool, rejectAgentTool, fetchPendingAgentTools, fetchAgentSessions, fetchAgentSession } from '../api'
 
 const defaultConfig = {
   dangerousPolicy: 'confirm',
@@ -180,12 +198,14 @@ export default {
     const showAdminDialog = inject('showAdminDialog')
     const loading = ref(false)
     const saving = ref(false)
+    const savingPersona = ref(false)
     const sending = ref(false)
     const error = ref('')
     const message = ref('')
     const mode = ref('config')
     const tools = ref([])
     const skills = ref([])
+    const personas = ref([])
     const stats = ref({ total: 0 })
     const prompt = ref('')
     const pendingId = ref('')
@@ -195,7 +215,9 @@ export default {
     const effectiveReadRoots = ref([])
     const history = ref([])
     const config = reactive(JSON.parse(JSON.stringify(defaultConfig)))
+    const persona = reactive({ dashboardPersona: '', qqInheritChatPersona: true })
     const isBrowserToolEnabled = computed(() => !!config.channels.dashboard.tools.browser_action)
+    const currentDashboardPersona = computed(() => persona.dashboardPersona || '')
 
     function applyConfig(next) {
       const merged = JSON.parse(JSON.stringify({ ...defaultConfig, ...(next || {}) }))
@@ -207,6 +229,14 @@ export default {
         config.autoRoute[channel].enabled = !!merged.autoRoute?.[channel]?.enabled
       }
       config.enabledSkills = Array.isArray(merged.enabledSkills) ? merged.enabledSkills.slice() : []
+      persona.dashboardPersona = String(merged.persona?.dashboardPersona || '')
+      persona.qqInheritChatPersona = merged.persona?.qqInheritChatPersona !== false
+    }
+
+    function applyPersona(next) {
+      const value = next && typeof next === 'object' ? next : {}
+      persona.dashboardPersona = String(value.dashboardPersona || '')
+      persona.qqInheritChatPersona = value.qqInheritChatPersona !== false
     }
 
     function formatTime(ts) {
@@ -271,11 +301,18 @@ export default {
         }
         if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '加载失败')
         applyConfig(res.data.config)
+        if (res.data.config?.persona) applyPersona(res.data.config.persona)
         mode.value = res.data.mode || 'config'
         tools.value = res.data.tools || []
         stats.value = res.data.stats || { total: 0 }
         skills.value = res.data.skills || []
+        personas.value = Array.isArray(res.data.personas) ? res.data.personas : personas.value
         effectiveReadRoots.value = Array.isArray(res.data.effectiveReadRoots) ? res.data.effectiveReadRoots : []
+        const personaRes = await fetchAgentPersonas()
+        if (personaRes.ok && personaRes.data?.ok) {
+          personas.value = Array.isArray(personaRes.data.personas) ? personaRes.data.personas : []
+          applyPersona(personaRes.data.persona)
+        }
         for (const tool of tools.value) {
           if (config.channels.qq.tools[tool.name] === undefined) config.channels.qq.tools[tool.name] = !!tool.qqEnabled
           if (config.channels.dashboard.tools[tool.name] === undefined) config.channels.dashboard.tools[tool.name] = !!tool.dashboardEnabled
@@ -286,6 +323,30 @@ export default {
         error.value = e.message || '加载失败'
       } finally {
         loading.value = false
+      }
+    }
+
+    async function savePersona() {
+      savingPersona.value = true
+      error.value = ''
+      message.value = ''
+      try {
+        const payload = JSON.parse(JSON.stringify(persona))
+        const res = await saveAgentPersona(payload)
+        if (isAdminRequired(res)) {
+          requestAdmin('切换 Agent 人格需要管理员密码', savePersona)
+          return
+        }
+        if (!res.ok || !res.data?.ok) throw new Error(res.data?.message || '人格更新失败')
+        applyPersona(res.data.persona || payload)
+        config.persona = JSON.parse(JSON.stringify(persona))
+        history.value = []
+        localStorage.removeItem('dashboard_agent_history')
+        message.value = res.data.message || 'Agent 人格已更新'
+      } catch (e) {
+        error.value = e.message || '人格更新失败'
+      } finally {
+        savingPersona.value = false
       }
     }
 
@@ -414,7 +475,7 @@ export default {
     }
 
     onMounted(() => { loadHistory(); loadConfig() })
-    return { loading, saving, sending, error, message, mode, tools, skills, stats, prompt, pendingId, pendingTools, sessions, selectedSession, effectiveReadRoots, isBrowserToolEnabled, history, config, formatTime, loadConfig, saveConfig, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, rejectPendingTool, loadSessionDetail, sendMessage }
+    return { loading, saving, savingPersona, sending, error, message, mode, tools, skills, personas, persona, currentDashboardPersona, stats, prompt, pendingId, pendingTools, sessions, selectedSession, effectiveReadRoots, isBrowserToolEnabled, history, config, formatTime, loadConfig, saveConfig, savePersona, addReadRoot, removeReadRoot, clearHistory, confirmPendingTool, rejectPendingTool, loadSessionDetail, sendMessage }
   },
 }
 </script>

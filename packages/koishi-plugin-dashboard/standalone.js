@@ -21,19 +21,55 @@ process.on('unhandledRejection', (reason) => {
 })
 
 const MAX_BODY_SIZE = 16 * 1024 * 1024 // 16MB，请求体包含图集上传的 base64 图片
+const EFFECTIVE_MAX_BODY_SIZE = parsePositiveInt(process.env.DASHBOARD_MAX_BODY_SIZE, 10 * 1024 * 1024, 1024 * 1024, MAX_BODY_SIZE)
+const MAX_DOWNLOAD_BYTES = parsePositiveInt(process.env.DASHBOARD_MAX_DOWNLOAD_BYTES, 256 * 1024 * 1024, 8 * 1024 * 1024, 2 * 1024 * 1024 * 1024)
+const MAX_STATIC_FILE_BYTES = parsePositiveInt(process.env.DASHBOARD_MAX_STATIC_FILE_BYTES, 32 * 1024 * 1024, 1024 * 1024, 256 * 1024 * 1024)
+const MAX_DEPLOY_TASK_LOG_BYTES = parsePositiveInt(process.env.DASHBOARD_MAX_DEPLOY_TASK_LOG_BYTES, 512 * 1024, 64 * 1024, 4 * 1024 * 1024)
+const MAX_AGENT_PREVIEW_FILE_BYTES = parsePositiveInt(process.env.DASHBOARD_AGENT_PREVIEW_MAX_BYTES, 512 * 1024, 64 * 1024, 2 * 1024 * 1024)
+const MAX_SMALL_TEXT_FILE_BYTES = parsePositiveInt(process.env.DASHBOARD_MAX_SMALL_TEXT_FILE_BYTES, 1024 * 1024, 4 * 1024, 4 * 1024 * 1024)
+const MAX_GALLERY_METADATA_BYTES = parsePositiveInt(process.env.DASHBOARD_GALLERY_METADATA_MAX_BYTES, 256 * 1024, 16 * 1024, 1024 * 1024)
+const MAX_DEPLOY_UPLOAD_BYTES = parsePositiveInt(process.env.DASHBOARD_DEPLOY_UPLOAD_MAX_BYTES, 1024 * 1024, 4 * 1024, 4 * 1024 * 1024)
+const HASH_CHUNK_BYTES = 64 * 1024
+
+function parsePositiveInt(value, fallback, min, max) {
+  const parsed = parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
 
 function collectBody(req, res, callback) {
-  let body = ''
+  const chunks = []
+  let total = 0
+  let rejected = false
+  const declared = parseInt(req.headers['content-length'], 10)
+  if (Number.isFinite(declared) && declared > EFFECTIVE_MAX_BODY_SIZE) {
+    res.writeHead(413, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, message: '请求体过大' }))
+    req.destroy()
+    return
+  }
   req.on('data', c => {
-    body += c
-    if (Buffer.byteLength(body) > MAX_BODY_SIZE) {
+    if (rejected) return
+    total += c.length
+    if (total > EFFECTIVE_MAX_BODY_SIZE) {
+      rejected = true
       res.writeHead(413, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ok: false, message: '请求体过大' }))
       req.destroy()
       return
     }
+    chunks.push(c)
   })
-  req.on('end', () => callback(body))
+  req.on('end', () => {
+    if (rejected) return
+    rejected = true
+    callback(Buffer.concat(chunks).toString('utf8'))
+  })
+  req.on('error', () => {
+    if (rejected) return
+    rejected = true
+    try { json(res, { ok: false, message: '请求读取失败' }, 400) } catch {}
+  })
 }
 
 // ====== 路径配置 ======
@@ -124,7 +160,7 @@ async function listAgentWorkspaceFiles({ root, query = '', limit = 120 } = {}) {
           type: entry.isDirectory() ? 'dir' : entry.isFile() ? 'file' : 'other',
           size: itemStat.size,
           mtimeMs: itemStat.mtimeMs,
-          injectable: entry.isFile() && itemStat.size <= 512 * 1024,
+          injectable: entry.isFile() && itemStat.size <= MAX_AGENT_PREVIEW_FILE_BYTES,
         })
       }
       if (entry.isDirectory()) await walk(full, depth + 1)
@@ -139,7 +175,7 @@ async function previewAgentWorkspaceFile(target) {
   const stat = await fs.promises.stat(abs)
   if (!stat.isFile()) throw new Error('不是文件：' + abs)
   const meta = { path: abs, name: path.basename(abs), size: stat.size, mtimeMs: stat.mtimeMs, binary: false, truncated: false, content: '' }
-  if (stat.size > 512 * 1024) {
+  if (stat.size > MAX_AGENT_PREVIEW_FILE_BYTES) {
     meta.truncated = true
     return meta
   }
@@ -221,13 +257,20 @@ function json(res, data, status = 200) {
   res.end(JSON.stringify(data))
 }
 
-function readFileSync(p) {
-  try { if (fs.statSync(p).isFile()) return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '').trim() } catch {}
+function readFileSync(p, maxBytes = MAX_SMALL_TEXT_FILE_BYTES) {
+  try {
+    const stat = fs.statSync(p)
+    if (stat.isFile() && stat.size <= maxBytes) return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '').trim()
+  } catch {}
   return ''
 }
 
-function readUtf8(p) {
-  try { return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '') } catch { return '' }
+function readUtf8(p, maxBytes = MAX_SMALL_TEXT_FILE_BYTES) {
+  try {
+    const stat = fs.statSync(p)
+    if (stat.isFile() && stat.size <= maxBytes) return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '')
+  } catch {}
+  return ''
 }
 
 function writeFileSync(p, content) {
@@ -276,6 +319,51 @@ function commandQuote(value) {
   const text = String(value)
   if (process.platform !== 'win32') return shellQuote(text)
   return '"' + text.replace(/"/g, '""') + '"'
+}
+
+function getLinuxNapcatQQExecutable() {
+  const napcatDir = String(process.env.NAPCAT_DIR || '').trim()
+  const candidates = [
+    process.env.NAPCAT_QQ_EXECUTABLE || '',
+    process.env.NAPCAT_QQ_PATH || '',
+    napcatDir ? path.join(napcatDir, 'opt', 'QQ', 'qq') : '',
+    napcatDir ? path.join(napcatDir, 'qq') : '',
+    path.join(KOISHI_DIR, 'Napcat', 'opt', 'QQ', 'qq'),
+    path.join(KOISHI_DIR, 'NapCat', 'opt', 'QQ', 'qq'),
+    '/root/Napcat/opt/QQ/qq',
+  ].filter(Boolean)
+  return uniquePaths(candidates).find(item => fs.existsSync(item)) || candidates[0] || '/root/Napcat/opt/QQ/qq'
+}
+
+function getLegacyNapcatStatus() {
+  const webuiPort = Number(process.env.NAPCAT_PORT || 6099)
+  const onebotPort = Number(process.env.NAPCAT_ONEBOT_PORT || 8080)
+  const webui = checkPortState(webuiPort)
+  const onebot = checkPortState(onebotPort)
+  let processLines = []
+  try {
+    const output = execSync('ps -eo pid=,args=', { encoding: 'utf8', timeout: 3000 })
+    processLines = output.split(/\r?\n/).map(line => line.trim()).filter(line => {
+      if (!line) return false
+      if (/\/opt\/QQ\/qq(?:\s|$)/.test(line)) return true
+      if (/\bxvfb-run\b/.test(line) && /\/opt\/QQ\/qq/.test(line)) return true
+      if (/\bXvfb\b/.test(line)) return true
+      if (/\bSCREEN\b/.test(line) && /\bnapcat\b/i.test(line)) return true
+      return false
+    })
+  } catch {}
+  const running = processLines.length > 0 || webui.status === 'occupied' || onebot.status === 'occupied'
+  const login = onebot.status === 'occupied' ? 'online' : (webui.status === 'occupied' ? 'waiting-login' : 'offline')
+  return {
+    running,
+    login,
+    webui: webui.status === 'occupied',
+    onebot: onebot.status === 'occupied',
+    webuiPort,
+    onebotPort,
+    qqExecutable: getLinuxNapcatQQExecutable(),
+    processes: processLines.slice(0, 12),
+  }
 }
 
 function validateDeployServer(server) {
@@ -364,10 +452,24 @@ function listFilesRecursive(root, predicate) {
 
 function hashFile(hash, repoRoot, filePath) {
   try {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile()) return
     const rel = path.relative(repoRoot, filePath).replace(/\\/g, '/')
     hash.update(rel)
     hash.update('\0')
-    hash.update(fs.readFileSync(filePath))
+    const fd = fs.openSync(filePath, 'r')
+    const buffer = Buffer.alloc(Math.min(HASH_CHUNK_BYTES, Math.max(1, stat.size || 1)))
+    try {
+      let position = 0
+      while (position < stat.size) {
+        const bytesRead = fs.readSync(fd, buffer, 0, Math.min(buffer.length, stat.size - position), position)
+        if (!bytesRead) break
+        hash.update(buffer.subarray(0, bytesRead))
+        position += bytesRead
+      }
+    } finally {
+      fs.closeSync(fd)
+    }
     hash.update('\0')
   } catch {}
 }
@@ -439,7 +541,7 @@ function buildFrontendDist(options = {}, callback) {
 
   if (updateStatus) updateStatus({ state: 'building', message: 'building', detail: '', startedAt, finishedAt: 0 })
   logFn('frontend build start: npm run build')
-  exec('npm run build', { cwd: feDir, timeout: 120000 }, (err, stdout, stderr) => {
+  exec('npm run build', { cwd: feDir, timeout: 120000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
     try {
       if (stdout) logFn(stdout.trim())
       if (stderr) logFn(stderr.trim())
@@ -761,7 +863,25 @@ function resolveProjectRel(rel) {
 }
 
 function fileSha256(filePath) {
-  try { return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') } catch { return '' }
+  try {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile()) return ''
+    const hash = crypto.createHash('sha256')
+    const fd = fs.openSync(filePath, 'r')
+    const buffer = Buffer.alloc(Math.min(HASH_CHUNK_BYTES, Math.max(1, stat.size || 1)))
+    try {
+      let position = 0
+      while (position < stat.size) {
+        const bytesRead = fs.readSync(fd, buffer, 0, Math.min(buffer.length, stat.size - position), position)
+        if (!bytesRead) break
+        hash.update(buffer.subarray(0, bytesRead))
+        position += bytesRead
+      }
+    } finally {
+      fs.closeSync(fd)
+    }
+    return hash.digest('hex')
+  } catch { return '' }
 }
 
 function readLocalDeployManifest() {
@@ -1048,6 +1168,7 @@ function validateDownloadedFile(filePath, options = {}) {
   const stat = fs.statSync(filePath)
   const minBytes = Number(options.minBytes || 0)
   if (minBytes && stat.size < minBytes) throw new Error(`下载文件过小：${stat.size} 字节，可能是网络错误页或下载不完整`)
+  if (stat.size > MAX_DOWNLOAD_BYTES) throw new Error(`下载文件过大：${stat.size} bytes`)
   const expectsZip = /\.zip$/i.test(String(options.expectedExt || '')) || /zip/i.test(String(options.expectedContentType || '')) || /\.zip$/i.test(filePath)
   if (expectsZip && !hasZipMagic(filePath)) throw new Error('下载文件不是有效 zip 包，可能下载到了 HTML 错误页或被代理改写')
   return { path: filePath, size: stat.size, name: path.basename(filePath) }
@@ -1502,6 +1623,8 @@ function normalizeGalleryStyle(value) {
 
 function readGalleryMetadata() {
   try {
+    const stat = fs.statSync(GALLERY_METADATA_FILE)
+    if (!stat.isFile() || stat.size > MAX_GALLERY_METADATA_BYTES) return {}
     const data = JSON.parse(fs.readFileSync(GALLERY_METADATA_FILE, 'utf8') || '{}')
     return data && typeof data === 'object' && !Array.isArray(data) ? data : {}
   } catch { return {} }
@@ -1510,7 +1633,9 @@ function readGalleryMetadata() {
 function writeGalleryMetadata(metadata) {
   fs.mkdirSync(GALLERY_DIR, { recursive: true })
   const tmp = GALLERY_METADATA_FILE + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(metadata || {}, null, 2), 'utf8')
+  const text = JSON.stringify(metadata || {}, null, 2)
+  if (Buffer.byteLength(text, 'utf8') > MAX_GALLERY_METADATA_BYTES) throw new Error('图集元数据过大，请先清理图集')
+  fs.writeFileSync(tmp, text, 'utf8')
   fs.renameSync(tmp, GALLERY_METADATA_FILE)
 }
 
@@ -1555,6 +1680,8 @@ function writeGalleryImage(input = {}) {
   if (!ext) throw new Error('只支持 PNG、JPG、WebP 或 GIF 图片')
   const raw = String(input.data || '').replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '')
   if (!raw) throw new Error('图片内容为空')
+  const estimatedBytes = Math.floor(raw.replace(/\s+/g, '').length * 3 / 4)
+  if (estimatedBytes > GALLERY_MAX_BYTES) throw new Error('图片不能超过 8MB')
   const buffer = Buffer.from(raw, 'base64')
   if (!buffer.length) throw new Error('图片内容为空')
   if (buffer.length > GALLERY_MAX_BYTES) throw new Error('图片不能超过 8MB')
@@ -1842,7 +1969,7 @@ function readLastLogLines(file, limit) {
 function readLastLogItems(file, limit = MAX_LOG_LIMIT) {
   if (!fs.existsSync(file)) return []
   const stat = fs.statSync(file)
-  const maxBytes = Math.min(stat.size, Math.max(512 * 1024, Math.min(12 * 1024 * 1024, clampLogLimit(limit) * 1200)))
+  const maxBytes = Math.min(stat.size, Math.max(256 * 1024, Math.min(4 * 1024 * 1024, clampLogLimit(limit) * 900)))
   const buffer = Buffer.alloc(maxBytes)
   const fd = fs.openSync(file, 'r')
   const startOffset = stat.size - maxBytes
@@ -2005,36 +2132,57 @@ function testChinesePathWrite(dir) {
 function downloadToRuntime(url, options, callback) {
   if (typeof options === 'function') { callback = options; options = {} }
   options = options || {}
+  let settled = false
+  const finish = (...args) => {
+    if (settled) return
+    settled = true
+    callback(...args)
+  }
   let parsed
-  try { parsed = new URL(url) } catch { callback(new Error('下载地址无效')); return }
-  if (!['http:', 'https:'].includes(parsed.protocol)) { callback(new Error('只支持 http/https 下载地址')); return }
+  try { parsed = new URL(url) } catch { finish(new Error('下载地址无效')); return }
+  if (!['http:', 'https:'].includes(parsed.protocol)) { finish(new Error('只支持 http/https 下载地址')); return }
   try { writeRuntimeLayout({ includeNapcat: false, includeNodeModules: false }) }
-  catch (e) { callback(new Error('准备本地部署工作目录失败：' + describeFsError(e))); return }
+  catch (e) { finish(new Error('准备本地部署工作目录失败：' + describeFsError(e))); return }
   const client = parsed.protocol === 'https:' ? https : http
   const req = client.get(parsed, (response) => {
     if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
       response.resume()
       const nextUrl = new URL(response.headers.location, parsed).toString()
-      downloadToRuntime(nextUrl, options, callback)
+      downloadToRuntime(nextUrl, options, finish)
       return
     }
     if (response.statusCode !== 200) {
       response.resume()
-      callback(new Error('下载失败：HTTP ' + response.statusCode))
+      finish(new Error('下载失败：HTTP ' + response.statusCode))
+      return
+    }
+    const declared = parseInt(response.headers['content-length'], 10)
+    if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
+      response.resume()
+      finish(new Error('下载文件过大：' + declared + ' bytes'))
       return
     }
     const name = getDownloadFileName(parsed, response, options)
     const filePath = runtimePath('downloads', name)
     const stream = fs.createWriteStream(filePath)
+    let received = 0
+    response.on('data', chunk => {
+      received += chunk.length
+      if (received > MAX_DOWNLOAD_BYTES) {
+        finish(new Error('下载文件过大：' + received + ' bytes'), filePath)
+        try { req.destroy(new Error('下载文件过大：' + received + ' bytes')) } catch {}
+        try { stream.destroy() } catch {}
+      }
+    })
     response.pipe(stream)
     stream.on('finish', () => stream.close(() => {
-      try { callback(null, filePath, validateDownloadedFile(filePath, { ...options, expectedContentType: response.headers['content-type'] })) }
-      catch (e) { callback(e, filePath) }
+      try { finish(null, filePath, validateDownloadedFile(filePath, { ...options, expectedContentType: response.headers['content-type'] })) }
+      catch (e) { finish(e, filePath) }
     }))
-    stream.on('error', callback)
+    stream.on('error', finish)
   })
   req.setTimeout(120000, () => req.destroy(new Error('下载超时')))
-  req.on('error', callback)
+  req.on('error', finish)
 }
 
 const localTasks = {
@@ -2323,6 +2471,7 @@ function spawnLocalTask(key, command, args = [], options = {}) {
     env: { ...process.env, ...(options.env || {}) },
     windowsHide: true,
     shell: options.shell === true,
+    maxBuffer: 512 * 1024,
   })
   task.process = child
   task.pid = child.pid || 0
@@ -3403,6 +3552,7 @@ const server = http.createServer(async (req, res) => {
       const { abs } = await resolveAgentWorkspacePath(url.searchParams.get('path') || '')
       const stat = await fs.promises.stat(abs)
       if (!stat.isFile()) return json(res, { ok: false, message: '不是文件' }, 400)
+      if (stat.size > MAX_DOWNLOAD_BYTES) return json(res, { ok: false, message: '文件过大，拒绝下载' }, 413)
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename="${encodeURIComponent(path.basename(abs))}"`,
@@ -3418,6 +3568,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const data = JSON.parse(body || '{}')
         const content = String(data.content || '')
+        if (Buffer.byteLength(content, 'utf8') > 1024 * 1024) return json(res, { ok: false, message: '上传文件过大' }, 413)
         if (content.length > 2 * 1024 * 1024) return json(res, { ok: false, message: '上传文件过大' }, 413)
         const { abs } = await resolveAgentUploadTarget(data.root, data.name)
         await fs.promises.mkdir(path.dirname(abs), { recursive: true })
@@ -3752,7 +3903,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/dashboard/api/bot/start' && req.method === 'POST') {
     if (!requireAdmin(req, res)) return
-    exec(`bash "${path.join(KOISHI_DIR, 'restart.sh').replace(/\\/g, '/')}"`, (err) => {
+    exec(`bash "${path.join(KOISHI_DIR, 'restart.sh').replace(/\\/g, '/')}"`, { maxBuffer: 512 * 1024 }, (err) => {
       if (err) log('start bot failed: ' + err.message)
     })
     return json(res, { ok: true, message: '启动命令已发送' })
@@ -3840,7 +3991,7 @@ const server = http.createServer(async (req, res) => {
         yml = yml.replace(/(selfId:\s*['\"]?)\d+(['\"]?)/, '$1' + selfId + '$2')
         fs.writeFileSync(ymlPath, yml, 'utf8')
         // 自动重启 koishi
-        exec(`bash "${path.join(KOISHI_DIR, 'restart.sh').replace(/\\/g, '/')}"`)
+        exec(`bash "${path.join(KOISHI_DIR, 'restart.sh').replace(/\\/g, '/')}"`, { maxBuffer: 512 * 1024 })
         json(res, { ok: true, message: 'QQ 号已更新，Koishi 正在重启...' })
       } catch (e) { json(res, { ok: false, message: e.message }, 400) }
     })
@@ -3849,17 +4000,24 @@ const server = http.createServer(async (req, res) => {
 
   // NapCat 管理
   if (pathname === '/dashboard/api/napcat/status' && req.method === 'GET') {
-    try {
-      execSync("ps aux | grep 'qq.*--no-sandbox' | grep -v grep", { encoding: 'utf8', timeout: 3000 })
-      return json(res, { running: true })
-    } catch { return json(res, { running: false }) }
+    return json(res, getLegacyNapcatStatus())
   }
   if (pathname === '/dashboard/api/napcat/restart' && req.method === 'POST') {
     const raw = process.env.DASHBOARD_QQ_NUMBER || '3098291287'
     const qq = raw.replace(/[^0-9]/g, '')
     if (!qq) return json(res, { ok: false, message: '无效 QQ 号' }, 400)
-    exec("screen -S napcat -X quit 2>/dev/null; sleep 2; screen -dmS napcat bash -c 'xvfb-run -a /root/Napcat/opt/QQ/qq --no-sandbox -q " + qq + "'")
-    return json(res, { ok: true, message: 'NapCat 重启命令已发送' })
+    const qqExecutable = getLinuxNapcatQQExecutable()
+    const logFile = process.env.NAPCAT_LOG_FILE || '/root/napcat.log'
+    const args = ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '-q', qq]
+    const inner = ['xvfb-run', '-a', qqExecutable].concat(args).map(shellQuote).join(' ') + ' >> ' + shellQuote(logFile) + ' 2>&1'
+    const command = [
+      'screen -S napcat -X quit 2>/dev/null || true',
+      'sleep 2',
+      'printf %s\\\\n ' + shellQuote('=== DASHBOARD NAPCAT RESTART ' + new Date().toISOString() + ' ===') + ' >> ' + shellQuote(logFile),
+      'screen -dmS napcat bash -lc ' + shellQuote(inner),
+    ].join('; ')
+    exec(command, { maxBuffer: 512 * 1024 })
+    return json(res, { ok: true, message: 'NapCat 重启命令已发送', qqExecutable, args })
   }
 
   // ==== 部署管理 ====
@@ -3999,7 +4157,7 @@ const server = http.createServer(async (req, res) => {
               return
             }
             log('$ ' + cmds[idx])
-            exec(cmds[idx], { cwd: repoRoot, timeout: 120000 }, (err, stdout, stderr) => {
+            exec(cmds[idx], { cwd: repoRoot, timeout: 120000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
               if (stdout) log(stdout.trim())
               if (stderr) log(stderr.trim())
               if (err) { log('❌ ' + err.message); log('FAIL'); return }
@@ -4019,7 +4177,13 @@ const server = http.createServer(async (req, res) => {
     try {
       const logFile = path.join(DEPLOY_TASKS_DIR, taskId + '.log')
       if (!fs.existsSync(logFile)) return json(res, { ok: false, lines: [], done: false })
-      const raw = fs.readFileSync(logFile, 'utf8').trim()
+      const stat = fs.statSync(logFile)
+      const start = Math.max(0, stat.size - MAX_DEPLOY_TASK_LOG_BYTES)
+      const fd = fs.openSync(logFile, 'r')
+      const buffer = Buffer.alloc(stat.size - start)
+      try { fs.readSync(fd, buffer, 0, buffer.length, start) }
+      finally { fs.closeSync(fd) }
+      const raw = buffer.toString('utf8').trim()
       const lines = raw ? raw.split('\n') : []
       const lastLine = lines.length > 0 ? lines[lines.length - 1] : ''
       const done = lastLine === 'DONE' || lastLine === 'FAIL'
@@ -4069,7 +4233,11 @@ const server = http.createServer(async (req, res) => {
         if (!name || !data) return json(res, { ok: false, message: '文件名或内容为空' }, 400)
         if (name !== 'bilibili-cookies.txt') return json(res, { ok: false, message: 'only bilibili-cookies.txt can be uploaded here' }, 400)
         const filePath = path.join(DATA_DIR, 'bilibili-cookies.txt')
-        const buf = Buffer.from(data, 'base64')
+        const raw = String(data || '').trim()
+        const estimatedBytes = Math.floor(raw.length * 3 / 4)
+        if (estimatedBytes > MAX_DEPLOY_UPLOAD_BYTES) return json(res, { ok: false, message: '上传文件过大' }, 413)
+        const buf = Buffer.from(raw, 'base64')
+        if (buf.length > MAX_DEPLOY_UPLOAD_BYTES) return json(res, { ok: false, message: '上传文件过大' }, 413)
         fs.mkdirSync(DATA_DIR, { recursive: true })
         fs.writeFileSync(filePath, buf)
         json(res, { ok: true, message: 'bilibili-cookies.txt 已保存到本地，部署时将自动推送' })
@@ -4128,8 +4296,14 @@ const server = http.createServer(async (req, res) => {
         res.end('Gallery image not found')
         return
       }
+      const stat = fs.statSync(filePath)
+      if (stat.size > GALLERY_MAX_BYTES) {
+        res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('Gallery image is too large')
+        return
+      }
       res.writeHead(200, { 'Content-Type': galleryMimeFromName(id), 'Cache-Control': 'public, max-age=3600' })
-      res.end(fs.readFileSync(filePath))
+      fs.createReadStream(filePath).pipe(res)
     } catch (e) {
       log('gallery image request failed: ' + (e.message || e))
       res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' })
@@ -4426,13 +4600,19 @@ const server = http.createServer(async (req, res) => {
         res.end('Forbidden')
         return true
       }
-      if (fs.statSync(filePath).isFile()) {
+      const stat = fs.statSync(filePath)
+      if (stat.isFile()) {
+        if (stat.size > MAX_STATIC_FILE_BYTES) {
+          res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' })
+          res.end('File too large')
+          return true
+        }
         const ext = path.extname(filePath)
         const mime = { '.html': 'text/html', '.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' }[ext] || 'application/octet-stream'
         const rel = path.relative(rootDir, filePath).replace(/\\/g, '/')
         const cache = rel === 'index.html' ? 'no-cache' : (rel.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600')
         res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': cache })
-        res.end(fs.readFileSync(filePath))
+        fs.createReadStream(filePath).pipe(res)
         return true
       }
     } catch {}
