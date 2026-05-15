@@ -4,13 +4,16 @@
  * 边界: 不读取任意本地文件、不执行 Skill、不修改配置。
  * 状态: 无。
  */
-const { readAgentSkill } = require('../skills')
+const { readAgentSkill, findRelevantAgentSkills } = require('../skills')
 const { getEnabledSkills } = require('../config')
 
 function isSkillEnabled(name, context = {}) {
   if (context.channel === 'dashboard' && context.autoRelevantSkill !== false) return true
   const target = String(name || '').trim().toLowerCase()
-  return !!target && getEnabledSkills().some(item => String(item || '').trim().toLowerCase() === target)
+  if (!target) return false
+  if (getEnabledSkills().some(item => String(item || '').trim().toLowerCase() === target)) return true
+  const relevant = findRelevantAgentSkills(context.userMessage || '', { limit: 8 })
+  return relevant.some(skill => String(skill.name || '').trim().toLowerCase() === target)
 }
 
 module.exports = {

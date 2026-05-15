@@ -56,7 +56,7 @@ function buildExplicitSearchRunOptions(userText = '') {
   const queries = buildSearchQueries(query)
   const primaryQuery = queries[0] || query
   return {
-    systemExtra: [{ role: 'system', content: '用户明确要求联网搜索。必须先调用 web_search 获取最新信息；如果 API 搜索失败，web_search 会改用受控浏览器搜索。只能根据工具结果回答，不要凭记忆回答。若工具结果为空、明显不相关、或主要是素材/模板/图片/下载站，必须说“这次搜索没有拿到可靠结果”，并简要说明搜索链路问题，不要编造答案。用户追问“你怎么知道/是搜索到的吗”时，要诚实说明依据来自本轮工具结果。' }],
+    systemExtra: [{ role: 'system', content: '用户明确要求联网搜索。必须先调用 web_search 获取最新信息；如 Skill 索引列出了 web_search_strategy，先读取该 Skill 的搜索策略。只能根据工具结果回答，不要凭记忆回答。候选页足够可信时，要以工具打开到的候选网页正文为主要依据；只有标题/摘要时必须降低确信度。若工具结果为空、明显不相关、或主要是素材/模板/图片/下载站，必须说“这次搜索没有拿到可靠结果”，并简要说明搜索链路问题，不要编造答案。用户追问“你怎么知道/是搜索到的吗”时，要诚实说明依据来自本轮工具结果。' }],
     forceTools: ['web_search'],
     preExecuteTools: [{ name: 'web_search', args: { query: primaryQuery, queries } }],
   }

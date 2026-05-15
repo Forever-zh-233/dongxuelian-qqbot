@@ -147,8 +147,37 @@ function getConversationHistory(session) {
   return []
 }
 
+function isSameConversationMessage(left = {}, right = {}) {
+  return String(left.role || '') === String(right.role || '') && normalizeText(left.content || '') === normalizeText(right.content || '')
+}
+
+function mergeConversationMessages(diskMessages = [], cachedMessages = []) {
+  const disk = (Array.isArray(diskMessages) ? diskMessages : []).filter(Boolean)
+  const cached = (Array.isArray(cachedMessages) ? cachedMessages : []).filter(Boolean)
+  if (!cached.length) return disk
+  if (!disk.length) return cached.slice()
+  let overlap = 0
+  const maxOverlap = Math.min(disk.length, cached.length)
+  for (let count = maxOverlap; count > 0; count -= 1) {
+    let matched = true
+    for (let i = 0; i < count; i += 1) {
+      if (!isSameConversationMessage(disk[disk.length - count + i], cached[i])) {
+        matched = false
+        break
+      }
+    }
+    if (matched) {
+      overlap = count
+      break
+    }
+  }
+  return disk.concat(cached.slice(overlap))
+}
+
 function saveConversationTurn(session, userText, replyText) {
   const key = getConversationKey(session); const diskData = readConversationDisk(key) || { summary: '', summaryTotal: 0, totalCount: 0, messages: [] }
+  diskData.messages = mergeConversationMessages(diskData.messages, conversationCache.get(key))
+  diskData.totalCount = Math.max(Number(diskData.totalCount || 0), diskData.messages.filter(item => item && item.role === 'user').length)
   const assistantParts = splitSentences(replyText).filter(p => p.trim()).map(part => ({ role: 'assistant', content: normalizeText(part) }))
   diskData.messages.push({ role: 'user', content: userText }, ...assistantParts); diskData.totalCount++
   if (diskData.messages.length > MAX_HISTORY_MESSAGES) diskData.messages.splice(0, diskData.messages.length - MAX_HISTORY_MESSAGES)
@@ -406,12 +435,72 @@ function collectReplyChain(channelKey, replyToId = '') {
   return result
 }
 
+function extractQuoteAuthorId(session) {
+  const q = session && session.quote || {}
+  return String(q.userId || q.user_id || q.user?.id || q.author?.id || q.authorId || q.sender?.userId || q.sender?.id || '')
+}
+
+function extractQuoteAuthorName(session) {
+  const q = session && session.quote || {}
+  const author = q.author
+  if (typeof author === 'string') return author
+  return String(q.nickname || q.nick || q.sender?.nickname || q.sender?.card || q.sender?.name || author?.nick || author?.name || q.userId || '')
+}
+
+function getQuoteMessageId(session, options = {}) {
+  const q = session && session.quote || {}
+  return String(options.replyToId || q.id || q.messageId || q.message_id || q.message?.id || '')
+}
+
+function getQuoteContentText(session) {
+  const q = session && session.quote || {}
+  if (!q) return ''
+  if (typeof q.content === 'string') return q.content
+  if (Array.isArray(q.content)) {
+    return q.content.map(function(s) {
+      if (s.type === 'text') return s.data && s.data.text || ''
+      if (s.type === 'image') return '[图片]'
+      if (s.type === 'face') return '[表情]'
+      if (s.type === 'at') return '@' + (s.data && (s.data.name || s.data.qq || s.data.id || ''))
+      if (s.type === 'forward') return '[转发消息]'
+      if (s.type === 'video') return '[视频]'
+      if (s.type === 'record') return '[语音]'
+      if (s.type === 'file') return '[文件]'
+      return '[消息]'
+    }).filter(Boolean).join('')
+  }
+  return q.raw_message || q.text || ''
+}
+
+function getQuoteInfo(session, options = {}) {
+  const content = getQuoteContentText(session)
+  if (!content) return { content: '', authorName: '', authorId: '', messageId: '', isSelf: false, matchedMessage: null }
+  const channelKey = getChannelKey(session)
+  const messageId = getQuoteMessageId(session, options)
+  const matchedMessage = messageId ? findChannelMessageById(channelKey, messageId) : null
+  const selfId = String(session?.selfId || session?.bot?.selfId || '')
+  const authorId = extractQuoteAuthorId(session)
+  const isSelf = !!(matchedMessage?.role === 'assistant' || (selfId && authorId && authorId === selfId))
+  return {
+    content,
+    authorName: extractQuoteAuthorName(session) || (isSelf ? '东雪莲' : ''),
+    authorId,
+    messageId,
+    isSelf,
+    matchedMessage,
+  }
+}
+
 function getQuotedMessageNote(session, options = {}) {
-  if (!session.quote?.content) return ''
-  const qtext = session.quote.content
+  const quoteInfo = getQuoteInfo(session, options)
+  if (!quoteInfo.content) return ''
+  const qtext = quoteInfo.content
   const recent = getConversationHistory(session).slice(-MAX_CHANNEL_PROMPT_MESSAGES)
   const match = recent.find(m => m.content && (qtext.includes(m.content.slice(0, 30)) || m.content.includes(qtext.slice(0, 30))))
   if (match) return '' // already in history
+  if (quoteInfo.isSelf) {
+    return `[引用你自己的历史回复]\n${qtext.slice(0, 160)}\n以上内容是你自己之前说过的话，不是当前用户说的；不要把它当成群友观点，也不要攻击自己。`
+  }
   return `[引用消息]\n${qtext.slice(0, 100)}`
 }
 
@@ -423,7 +512,7 @@ function getSharedContextNote(session, currentUserId = '', options = {}) {
   const mentionUserIds = Array.isArray(options.mentionUserIds) ? options.mentionUserIds.map(String).filter(Boolean) : []
   mentionUserIds.forEach(u => focusUserIds.add(u)); replyChain.forEach(item => { if (item.userId) focusUserIds.add(String(item.userId)); if (item.messageId) focusMessageIds.add(String(item.messageId)) })
   if (!replyChain.length && currentUserId) { items.slice(-MAX_THREAD_CONTEXT_MESSAGES).filter(item => item.userId !== currentUserId && item.mentionUserIds.includes(currentUserId)).forEach(item => { if (item.userId) focusUserIds.add(String(item.userId)); item.mentionUserIds.forEach(u => focusUserIds.add(String(u))) }) }
-  let scoped = items.filter(item => { if (item.role === 'assistant') return false; if (focusMessageIds.has(String(item.messageId || ''))) return true; if (focusUserIds.has(String(item.userId || ''))) return true; return item.mentionUserIds.some(u => focusUserIds.has(String(u))) })
+  let scoped = items.filter(item => { if (item.role === 'assistant' && !focusMessageIds.has(String(item.messageId || ''))) return false; if (focusMessageIds.has(String(item.messageId || ''))) return true; if (focusUserIds.has(String(item.userId || ''))) return true; return item.mentionUserIds.some(u => focusUserIds.has(String(u))) })
   if (!scoped.length && options.randomTriggered && currentUserId) scoped = items.filter(item => item.role !== 'assistant' && item.userId === currentUserId)
   if (!scoped.length) scoped = items.filter(item => item.role !== 'assistant').slice(-Math.min(MAX_THREAD_CONTEXT_MESSAGES, MAX_CHANNEL_PROMPT_MESSAGES))
   const IDLE_GAP_MS = 10 * 60 * 1000
@@ -517,14 +606,14 @@ module.exports = {
   pendingSensitiveAlert, channelTodayCache,
   getConversationKey, getChannelKey, touchConversation,
   readConversationDisk, writeConversationDisk,
-  getConversationHistory, saveConversationTurn, generateConversationSummary,
+  getConversationHistory, saveConversationTurn, mergeConversationMessages, generateConversationSummary,
   clearConversationHistory, clearUserConversationHistory,
   getReplyFingerprintHistory, saveReplyFingerprint,
   getRecentAssistantReplies, getRecentUserMessages,
   parseUserMessageEnvelope, getUserMessageContent, normalizeUserMessageForPrompt,
   saveSharedChannelTurn,
   findChannelMessageById, collectReplyChain,
-  getQuotedMessageNote, getSharedContextNote,
+  getQuoteContentText, getQuoteInfo, getQuotedMessageNote, getSharedContextNote,
   saveUserProfile, saveSensitiveCache, analyzeChannelSensitive,
   writeMemory, deleteMemory, clearUserMemory, clearGroupMemory, getMemorySummary,
   readMemoryTimer, checkMemoryTimerExpired,

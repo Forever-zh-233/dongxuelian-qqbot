@@ -244,6 +244,52 @@ async function run(t) {
     waitFor: message => String(message).includes('\u5efa\u8bae\u795e\u5361'),
   })
 
+  await runChatCase(t, 'internal cache prompt leak retries', [
+    { json: { choices: [{ message: { content: '这是你在本群的发言： 昵称：你 发言：要是机械臂就算了 [群聊刷到]' } }] } },
+    { json: { choices: [{ message: { content: '机器人动作确实挺流畅' } }] } },
+  ], async (result) => {
+    checkSentIncludes(t, 'scenario internal prompt leak retries to clean reply', result, '机器人动作确实挺流畅')
+    checkSentExcludes(t, 'scenario internal prompt leak does not send profile marker', result, '这是你在本群的发言')
+    checkSentExcludes(t, 'scenario internal prompt leak does not send nickname marker', result, '昵称：')
+  }, {
+    input: '这个机器人怎么这么流畅',
+    waitFor: message => String(message).includes('机器人动作确实挺流畅'),
+  })
+
+  await runChatCase(t, 'user profile prompt is internal system context', [
+    { json: { choices: [{ message: { content: 'profile-context-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario user profile internal context sends reply', result, 'profile-context-ok')
+    const messages = calls[0]?.requestBody?.messages || []
+    const profileMessage = messages.find(item => String(item.content || '').includes('[内部参考-用户近期发言风格]'))
+    t.check('scenario user profile context uses system role', profileMessage && profileMessage.role === 'system', JSON.stringify(messages))
+    t.check('scenario user profile context is not user role', !messages.some(item => item.role === 'user' && String(item.content || '').includes('这是tester在本群的发言')), JSON.stringify(messages))
+  }, {
+    input: '继续说',
+    setup(session, { data }) {
+      data.writeJson(`user-profiles/${session.guildId}/${session.userId}.json`, {
+        userId: session.userId,
+        names: ['tester'],
+        messages: [{ content: '要是机械臂就算了' }],
+      })
+    },
+    waitFor: message => String(message).includes('profile-context-ok'),
+  })
+
+  await runChatCase(t, 'quoted bot message is marked as self quote', [
+    { json: { choices: [{ message: { content: 'self-quote-ok' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario quoted self message sends reply', result, 'self-quote-ok')
+    const prompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario quoted self prompt marks own reply', prompt.includes('引用你自己历史回复') && prompt.includes('不要攻击自己'), prompt)
+  }, {
+    input: '？',
+    session: {
+      quote: { content: '这都能联想到核废水，你这脑回路也是没谁了', userId: '90000' },
+    },
+    waitFor: message => String(message).includes('self-quote-ok'),
+  })
+
   await runChatCase(t, 'persistent thinking leak fallback', Array.from({ length: 7 }, () => ({
     json: { choices: [{ message: { content: INCIDENT_SAMPLE } }] },
   })), async (result) => {
@@ -278,6 +324,38 @@ async function run(t) {
   }, {
     input: '\u4f60\u770b\u770b\u8fd9\u4e2a',
     waitFor: message => String(message).includes('\u4f60\u770b\u770b\u8fd9\u4e2a\u4e5f\u6ca1\u95ee\u9898'),
+  })
+
+  await runChatCase(t, 'QQ Agent search context bridges into normal chat follow-up', [
+    { json: { choices: [{ message: { content: 'NO' } }] } },
+    { json: { choices: [{ message: { content: 'normal follow-up answer' } }] } },
+  ], async (result, mocked, session, calls) => {
+    checkSentIncludes(t, 'scenario agent bridge sends follow-up reply', result, 'normal follow-up answer')
+    const followUpCall = calls.find(call => JSON.stringify(call.requestBody?.messages || []).includes('最近 Agent 工具上下文'))
+    const prompt = JSON.stringify(followUpCall?.requestBody?.messages || [])
+    t.check('scenario normal chat sees recent agent search summary', prompt.includes('已搜索：鸣潮 最新角色') && prompt.includes('不要说自己没搜索'), prompt)
+    const conversation = require(path.join(AI_ROOT, 'lib', 'conversation.js'))
+    const history = conversation.getConversationHistory(session)
+    t.check('scenario agent bridge stores agent reply in conversation history', history.some(item => item.role === 'assistant' && item.content.includes('agent searched answer')), JSON.stringify(history))
+  }, {
+    input: '你刚刚搜到哪些东西',
+    setup(session) {
+      const bridge = require(path.join(AI_ROOT, 'lib', 'agent-chat-bridge.js'))
+      bridge.clearAgentChatBridge()
+      bridge.recordAgentChatResult({
+        session,
+        userMessage: '调用web_search查鸣潮最新角色',
+        userName: 'tester',
+        userId: session.userId,
+        channelKey: session.guildId,
+        agentResult: {
+          reply: 'agent searched answer',
+          toolCalls: 1,
+          toolResults: [{ name: 'web_search', result: '已搜索：鸣潮 最新角色\n搜索结果：\n1. 官方公告\n   https://wutheringwaves.kurogames.com/news/mock\n   库洛官方公告公开新共鸣者。' }],
+        },
+      })
+    },
+    waitFor: message => String(message).includes('normal follow-up answer'),
   })
 
   await runChatCase(t, 'legacy user history is isolated before model request', [

@@ -116,6 +116,7 @@ const { logDebug } = require('./logging-config')
 const { heuristicRoute, llmRoute, buildExplicitSearchRunOptions } = require('./agent/router')
 const agentEngine = require('./agent/engine')
 const { enqueueAgentTask, configureAgentQueue } = require('./agent/queue')
+const { recordAgentChatResult } = require('./agent-chat-bridge')
 
 // @satorijs/core@3.7.0 缺少 stripped / parsed / resolve / send，这里随插件加载安装兼容补丁。
 function patchElementText(element) {
@@ -1021,12 +1022,12 @@ exports.apply = (ctx) => {
           channelPendingRandom.delete(channelKey)
           if (p && shouldTriggerRandom(Math.min(getRandomTriggerRate(channelKey) * willFactor, 1.0))) {
             channelMissCount.set(channelKey, 0)
-            enqueueForChannel(channelKey, () => chat(session, p.combinedText, ctx, { randomTriggered: true, sharedContextNote: p.sharedContextNote, quotedMessageNote: p.quotedMessageNote, forwardSummaryText: p.forwardSummaryText }).then(reply => safeSendReply(ctx, session, reply, true)), 4)
+            enqueueForChannel(channelKey, () => chat(session, p.combinedText, ctx, { randomTriggered: true, sharedContextNote: p.sharedContextNote, quotedMessageNote: p.quotedMessageNote, forwardSummaryText: p.forwardSummaryText, replyToId: p.replyToId }).then(reply => safeSendReply(ctx, session, reply, true)), 4)
           } else {
             channelMissCount.set(channelKey, (channelMissCount.get(channelKey) || 0) + 1)
           }
         }, 15000)
-        channelPendingRandom.set(channelKey, { timer, combinedText: plain, sharedContextNote: pendingSharedContextNote, quotedMessageNote, forwardSummaryText })
+        channelPendingRandom.set(channelKey, { timer, combinedText: plain, sharedContextNote: pendingSharedContextNote, quotedMessageNote, forwardSummaryText, replyToId: analyzed.replyToId })
       }
     }
     const randomTriggered = isRandomCandidate && shouldTriggerRandom(Math.min(getRandomTriggerRate(channelKey) * willFactor, 1.0))
@@ -1122,19 +1123,22 @@ exports.apply = (ctx) => {
                 const searchRunOptions = buildExplicitSearchRunOptions(userText)
                 return agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions })
               }
-              const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds })
+              const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
               return { reply, normalChat: true }
             },
           }).then(result => {
             if (result?.normalChat && inGuild && /别问了，这个我不聊/.test(result.reply)) {
               notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})
             }
+            if (result && !result.normalChat) {
+              recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult: result })
+            }
             return safeSendReply(ctx, session, result?.reply || '(Agent 未获取有效回复)', randomTriggered)
           }).catch(async error => {
             const code = error && error.code ? String(error.code) : ''
             if (code === 'AGENT_QUEUE_FULL' || code === 'AGENT_QUEUE_REJECTED') {
               try {
-                const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds })
+                const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
                 return safeSendReply(ctx, session, reply, randomTriggered)
               } catch {}
             }
@@ -1153,6 +1157,7 @@ exports.apply = (ctx) => {
             timeoutMs: agentConfig.queue?.timeoutMs,
             fn: () => agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions }),
           }).then(agentResult => {
+            recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult })
             return safeSendReply(ctx, session, agentResult.reply || '(Agent 未获取有效回复)', randomTriggered)
           }).catch(error => {
             const code = error && error.code ? String(error.code) : ''
@@ -1162,7 +1167,7 @@ exports.apply = (ctx) => {
           })
           return
         }
-        const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds })
+        const reply = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
         if (inGuild && /别问了，这个我不聊/.test(reply)) {
           notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})
         }

@@ -491,6 +491,7 @@ async function main() {
     handler: path.join(LIB, 'handler'),
     messageReader: path.join(LIB, 'message-reader'),
     chat: path.join(LIB, 'chat'),
+    agentChatBridge: path.join(LIB, 'agent-chat-bridge'),
     jailbreakRuleset: path.join(LIB, 'rulesets', 'jailbreak'),
     runtimeConfig: path.join(LIB, 'runtime-config'),
     reply: path.join(LIB, 'reply'),
@@ -597,12 +598,13 @@ async function main() {
     conversation: [
       'getConversationKey', 'getChannelKey', 'touchConversation',
       'readConversationDisk', 'writeConversationDisk', 'getConversationHistory',
-      'saveConversationTurn', 'generateConversationSummary', 'saveSharedChannelTurn',
+      'saveConversationTurn', 'mergeConversationMessages', 'generateConversationSummary', 'saveSharedChannelTurn',
       'saveUserProfile', 'saveSensitiveCache', 'analyzeChannelSensitive',
       'clearConversationHistory', 'clearUserConversationHistory',
       'getReplyFingerprintHistory', 'saveReplyFingerprint', 'getRecentAssistantReplies',
       'getRecentUserMessages', 'parseUserMessageEnvelope', 'getUserMessageContent',
       'normalizeUserMessageForPrompt', 'findChannelMessageById', 'flushTodayCacheToDisk', 'collectReplyChain',
+      'getQuoteContentText', 'getQuoteInfo',
       'getQuotedMessageNote', 'getSharedContextNote',
       'writeMemory', 'deleteMemory', 'clearUserMemory', 'clearGroupMemory', 'getMemorySummary',
       'readMemoryTimer', 'checkMemoryTimerExpired',
@@ -611,6 +613,10 @@ async function main() {
       'chat', 'loadConfig', 'resetConfigCache', 'loadSkills',
       'loadSkillsContentCache', 'callOpenAI', 'getThinkingArgs',
       'getSkillsCount', 'getThinkingEnabled', 'setThinkingEnabled',
+    ],
+    agentChatBridge: [
+      'buildAgentContextKey', 'summarizeAgentToolResults', 'extractSearchSummary',
+      'recordAgentChatResult', 'getRecentAgentContextNote', 'clearAgentChatBridge',
     ],
     jailbreakRuleset: [
       'combinePatterns',
@@ -677,13 +683,14 @@ async function main() {
       'normalizeIntentText', 'normalizeRequestedPath', 'resolveAgentPathInput', 'getWorkspaceSemanticCandidates', 'formatWorkspaceContext', 'buildAgentWorkspaceContext',
     ],
     agentSearchQuery: [
-      'cleanExplicitSearchQuery', 'buildSearchQueries', 'isWuwaLatestRoleQuery', 'getSearchHostname', 'scoreSearchResult', 'isLowQualitySearchResult', 'sortSearchResults',
+      'cleanExplicitSearchQuery', 'buildSearchQueries', 'getDirectSearchCandidates', 'isWuwaLatestRoleQuery', 'isMinecraftUpdateQuery', 'getSearchHostname', 'scoreSearchResult', 'isLowQualitySearchResult', 'sortSearchResults',
     ],
     agentSearchResults: [
-      'normalizeResultUrl', 'normalizeSearchCandidate', 'isUsefulSearchResult', 'hasQuerySignal', 'rankSearchCandidates', 'formatSearchResults', 'buildSearchFailureText',
+      'normalizeResultUrl', 'normalizeSearchCandidate', 'isUsefulSearchResult', 'hasQuerySignal', 'getResultDomainSignal', 'rankSearchCandidates', 'formatSearchResults', 'buildSearchFailureText',
     ],
     agentHttpSearch: [
-      'decodeHttpSearchEntities', 'stripHttpSearchTags', 'resolveHttpSearchUrl', 'extractHttpSearchCandidates', 'runHttpSearch',
+      'decodeHttpSearchEntities', 'stripHttpSearchTags', 'resolveHttpSearchUrl', 'extractHttpSearchCandidates',
+      'extractHttpPageText', 'fetchHttpResultPage', 'readTopResultPages', 'mergeHttpSearchCandidates', 'formatSearchWithPages', 'runHttpSearch',
     ],
     agentQueue: [
       'enqueueAgentTask', 'getAgentQueueStats', 'clearAgentQueue', 'configureAgentQueue', 'resetAgentQueueForTests',
@@ -809,6 +816,7 @@ async function main() {
     path.join(LIB, 'persona.js'),
     path.join(LIB, 'message-reader.js'),
     path.join(LIB, 'chat.js'),
+    path.join(LIB, 'agent-chat-bridge.js'),
     path.join(LIB, 'rulesets', 'jailbreak.js'),
     path.join(LIB, 'runtime-config.js'),
     path.join(LIB, 'reply.js'),
@@ -873,7 +881,7 @@ async function main() {
     runSyntaxCheck(`node -c ${path.relative(ROOT, file)}`, file)
   }
 
-  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/persona-context.js', 'agent/workspace-context.js', 'agent/search-query.js', 'agent/search-results.js', 'agent/http-search.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/read-agent-skill.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
+  const duplicateScanFiles = ['index.js', 'constants.js', 'utils.js', 'persona.js', 'api.js', 'conversation.js', 'handler.js', 'message-reader.js', 'chat.js', 'agent-chat-bridge.js', 'rulesets/jailbreak.js', 'runtime-config.js', 'health-check.js', 'reply.js', 'reply-guard.js', 'repeat.js', 'forward.js', 'vision.js', 'sensitive.js', 'retaliation.js', 'send-guard.js', 'agent/engine.js', 'agent/messages.js', 'agent/config.js', 'agent/context.js', 'agent/persona-context.js', 'agent/workspace-context.js', 'agent/search-query.js', 'agent/search-results.js', 'agent/http-search.js', 'agent/queue.js', 'agent/memory.js', 'agent/push.js', 'agent/cron.js', 'agent/plan/plan-store.js', 'agent/plan/plan-engine.js', 'agent/plan/plan-prompts.js', 'agent/plan/plan-tools.js', 'agent/plan/plan-runner.js', 'agent/path-guard.js', 'agent/skills.js', 'agent/skill-hub.js', 'agent/router.js', 'agent/sessions.js', 'agent/stats.js', 'agent/pending.js', 'agent/safety.js', 'agent/tools/registry.js', 'agent/tools/get-time.js', 'agent/tools/calculator.js', 'agent/tools/web-search.js', 'agent/tools/read-agent-skill.js', 'agent/tools/browser-action.js', 'agent/tools/read-file.js', 'agent/tools/list-files.js', 'agent/tools/find-files.js', 'agent/tools/write-file.js', 'agent/tools/edit-file.js', 'agent/tools/shell.js', 'agent/tools/memory-tools.js', 'agent/tools/append-file.js', 'agent/tools/grep-search.js', 'agent/tools/execute-javascript.js', 'agent/tools/send-file-to-user.js', 'agent/tools/get-token-usage.js', 'agent/tools/set-user-timezone.js', 'agent/tools/query-logs.js']
   const functions = []
   for (const file of duplicateScanFiles) {
     const src = read(path.join(LIB, file))
@@ -1251,6 +1259,13 @@ async function main() {
     { title: '鸣潮 3.3 版本前瞻直播回顾', url: 'https://www.bilibili.com/video/mock', snippet: '库洛官方直播公开新共鸣者情报' },
   ], '鸣潮 最新角色')
   check('agent search results keeps semantic query matches', semanticSearch.length === 1 && semanticSearch[0].title.includes('版本前瞻'), JSON.stringify(semanticSearch))
+  const wuwaTitleWithoutLiteralQuery = modules.agentSearchResults.rankSearchCandidates([
+    { title: '3.3版本更新内容详解', url: 'https://wutheringwaves.kurogames.com/zh-cn/main/news/detail/mock', snippet: '官方公告提到新共鸣者和卡池安排。' },
+  ], '鸣潮最新角色')
+  const minecraftTitleWithoutChineseQuery = modules.agentSearchResults.rankSearchCandidates([
+    { title: 'Minecraft 1.21 Release Notes', url: 'https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21', snippet: 'Official release changelog and update notes.' },
+  ], '我的世界更新')
+  check('agent search results accepts trusted results without literal query words', wuwaTitleWithoutLiteralQuery.length === 1 && minecraftTitleWithoutChineseQuery.length === 1, JSON.stringify({ wuwaTitleWithoutLiteralQuery, minecraftTitleWithoutChineseQuery }))
   const searchFailureText = modules.agentSearchResults.buildSearchFailureText('我的世界 最新版本', ['bing.com: 未提取到有效结果'])
   check('agent search failure refuses body text fallback', searchFailureText.includes('拒绝把广告、导航、侧栏正文当作搜索事实') && !searchFailureText.includes('当前页面：'), searchFailureText)
   const httpSearchCandidates = modules.agentHttpSearch.extractHttpSearchCandidates(`
@@ -1260,6 +1275,20 @@ async function main() {
     </body></html>
   `, 'https://duckduckgo.com/html/?q=x')
   check('agent http search extracts decoded redirected URLs', httpSearchCandidates.length === 1 && httpSearchCandidates[0].url.includes('wutheringwaves.kurogames.com/news/mock'), JSON.stringify(httpSearchCandidates))
+  const httpPageText = modules.agentHttpSearch.extractHttpPageText('<html><body><script>window.__noise="bad"</script><nav>首页 导航</nav><main>库洛官方公告正文：新共鸣者情报、版本前瞻、卡池说明都会在这里集中发布，轻量 HTTP 读取候选网页正文可以继续补充搜索结果。</main><footer>ICP备案 隐私政策</footer></body></html>', 300)
+  check('agent http search extracts candidate page body without script/nav noise', httpPageText.includes('库洛官方公告正文') && !httpPageText.includes('window.__noise') && !httpPageText.includes('首页 导航'), httpPageText)
+  const searchWithPages = modules.agentHttpSearch.formatSearchWithPages('鸣潮 最新角色', rankedSearch, { pages: [{ title: '《鸣潮》官方公告 新共鸣者', url: 'https://wutheringwaves.kurogames.com/news/mock', text: '候选网页正文提到新共鸣者和版本前瞻。' }] })
+  check('agent http search appends bounded page body summaries', searchWithPages.includes('打开候选网页继续读取') && searchWithPages.includes('候选网页正文提到新共鸣者'), searchWithPages)
+  const mergedHttpCandidates = modules.agentHttpSearch.mergeHttpSearchCandidates(
+    [{ title: 'A', url: 'https://example.com/a' }],
+    [{ title: 'A2', url: 'https://example.com/a' }, { title: 'B', url: 'https://example.com/b' }]
+  )
+  check('agent http search merges candidates without duplicates', mergedHttpCandidates.length === 2 && mergedHttpCandidates[1].title === 'B', JSON.stringify(mergedHttpCandidates))
+  const bridgeSummary = modules.agentChatBridge.extractSearchSummary(searchWithPages)
+  check('agent chat bridge extracts compact web search summary', bridgeSummary.includes('已搜索：鸣潮 最新角色') && bridgeSummary.includes('wutheringwaves.kurogames.com'), bridgeSummary)
+  const bridgeNoteMissing = modules.agentChatBridge.getRecentAgentContextNote({ channelKey: 'cascade-channel', userId: 'cascade-user', userMessage: '你刚刚搜到什么' })
+  checkEqual('agent chat bridge is empty before record', bridgeNoteMissing, '')
+  modules.agentChatBridge.clearAgentChatBridge()
   const externalized = modules.agentContext.externalizeToolResult('x'.repeat(8100), 'cascade-test-tool', 100)
   const externalizedPath = externalized.match(/完整结果已保存：(.+)\)$/)?.[1] || ''
   check('agent context externalizes long tool results', externalized.includes('完整结果已保存') && fs.existsSync(externalizedPath))
@@ -1268,11 +1297,13 @@ async function main() {
   check('agent skill summary ignores empty selection', modules.agentSkills.buildAgentSkillSummary([]) === '')
   check('agent skill index excludes personas', modules.agentSkills.listAgentSkills().every(skill => skill.kind !== 'persona'))
   check('agent skill index includes directory skills', modules.agentSkills.listAgentSkills().some(skill => skill.name === 'pptx' && skill.directorySkill))
-  check('agent skill index includes borrowed practical skills', ['QA_source_index', 'pptx', 'pdf', 'docx', 'browser_cdp', 'browser_visible'].every(name => modules.agentSkills.findAgentSkill(name)))
+  check('agent skill index includes borrowed practical skills', ['QA_source_index', 'pptx', 'pdf', 'docx', 'browser_cdp', 'browser_visible', 'web_search_strategy'].every(name => modules.agentSkills.findAgentSkill(name)))
   const compactSkillSummary = modules.agentSkills.buildAgentSkillSummary(['wuwa-lore', 'pptx'])
   check('agent skill summary is compact index', compactSkillSummary.includes('轻量索引') && compactSkillSummary.includes('read_agent_skill') && !compactSkillSummary.includes('星球与基础概念'))
   check('agent read skill returns selected content', modules.agentSkills.readAgentSkill('pptx').content.includes('PPTX Skill'))
   check('agent relevant skill search maps frontend wording to source index', modules.agentSkills.findRelevantAgentSkills('bot前端应该看哪里').some(skill => skill.name === 'QA_source_index'))
+  check('agent relevant skill search maps web search wording to strategy skill', modules.agentSkills.findRelevantAgentSkills('联网查最新消息要怎么搜索来源').some(skill => skill.name === 'web_search_strategy'))
+  check('agent search strategy skill tells agent to read candidate bodies', modules.agentSkills.readAgentSkill('web_search_strategy').content.includes('只看标题和摘要不算完成搜索'))
   checkThrows('agent read skill rejects unknown skill', () => modules.agentSkills.readAgentSkill('../personas/测试人格'), /未知 Agent Skill/)
   checkThrows('agent read skill rejects path traversal', () => modules.agentSkills.readAgentSkill('pptx', { file: '../pdf/SKILL.md' }), /越过|超出|不能/)
   check('agent persona context lists personas separately', modules.agentPersonaContext.listAgentPersonasForConsole().some(item => item.name))
@@ -1281,6 +1312,8 @@ async function main() {
   const dashboardPersonaPrompt = modules.agentPersonaContext.buildAgentPersonaContext({ channel: 'dashboard', dashboardPersona: '测试人格' }).map(item => item.content).join('\n')
   check('agent persona context applies dashboard persona', dashboardPersonaPrompt.includes('当前人格：测试人格') && dashboardPersonaPrompt.includes('来源：Console 人格'))
   check('agent search query expands wuwa latest role query', modules.agentSearchQuery.buildSearchQueries('鸣潮最新角色是谁').some(item => item.includes('官方')))
+  check('agent search query expands generic latest source query', modules.agentSearchQuery.buildSearchQueries('某个游戏最新版本').some(item => item.includes('来源') || item.includes('official')))
+  check('agent search query returns direct official candidates', modules.agentSearchQuery.getDirectSearchCandidates('Minecraft 我的世界 更新').some(item => item.url.includes('minecraft.net')))
   check('agent search query ranks official result above material site', modules.agentSearchQuery.scoreSearchResult({ title: '鸣潮 官方公告 新共鸣者', url: 'https://wutheringwaves.kurogames.com/news/1', snippet: '新角色' }, '鸣潮最新角色') > modules.agentSearchQuery.scoreSearchResult({ title: '鸣潮角色图片素材', url: 'https://699pic.com/a', snippet: '素材下载' }, '鸣潮最新角色'))
   check('agent skill hub formats empty list', modules.agentSkillHub.formatSkillHubItems([]).includes('未找到'))
   modules.agentSessions.clearAgentSessions()
@@ -1372,6 +1405,8 @@ async function main() {
     fs.mkdirSync(path.join(agentTmp, 'ai-skills', 'docs', 'DemoSkill'), { recursive: true })
     fs.writeFileSync(path.join(agentTmp, 'ai-skills', 'docs', 'DemoSkill', 'SKILL.md'), '---\nname: DemoSkill\ndescription: demo skill\n---\nDEMO_SKILL_BODY', 'utf8')
     fs.writeFileSync(path.join(agentTmp, 'ai-skills', 'docs', 'DemoSkill', 'notes.md'), 'DEMO_REFERENCE_BODY', 'utf8')
+    fs.mkdirSync(path.join(agentTmp, 'ai-skills', 'docs', 'web_search_strategy'), { recursive: true })
+    fs.writeFileSync(path.join(agentTmp, 'ai-skills', 'docs', 'web_search_strategy', 'SKILL.md'), '---\nname: web_search_strategy\ndescription: search strategy\n---\n只看标题和摘要不算完成搜索。候选页足够可信时要读取正文。', 'utf8')
     check('read_agent_skill reads enabled skill body', (await isolatedReadAgentSkill.execute({ name: 'DemoSkill' })).includes('DEMO_SKILL_BODY'))
     check('read_agent_skill reads enabled reference file', (await isolatedReadAgentSkill.execute({ name: 'DemoSkill', file: 'notes.md' })).includes('DEMO_REFERENCE_BODY'))
     await isolatedConfig.patchAgentConfig({ enabledSkills: [] })
@@ -1381,6 +1416,7 @@ async function main() {
     } catch (error) {
       check('read_agent_skill rejects disabled skill', /未启用/.test(String(error && error.message || error)))
     }
+    check('read_agent_skill allows auto relevant search strategy skill', (await isolatedReadAgentSkill.execute({ name: 'web_search_strategy' }, { channel: 'qq', userMessage: '联网查最新消息来源' })).includes('只看标题和摘要不算完成搜索'))
     await isolatedConfig.patchAgentConfig({ persona: { dashboardPersona: '测试人格', qqInheritChatPersona: false } })
     check('agent config stores persona settings', isolatedConfig.getAgentPersonaConfig().dashboardPersona === '测试人格' && isolatedConfig.getAgentPersonaConfig().qqInheritChatPersona === false)
     const writeRoot = path.join(agentTmp, 'workspace')
@@ -1414,6 +1450,7 @@ async function main() {
       const originalFetchForWebSearch = global.fetch
       const originalBrowserSearchEnv = process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH
       const originalAllowChromiumEnv = process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH
+      const originalBrowserMinAvailableEnv = process.env.DONGXUELIAN_AGENT_BROWSER_MIN_AVAILABLE_MB
       delete process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH
       delete process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH
       try {
@@ -1425,10 +1462,54 @@ async function main() {
             async text() { return mockSearchHtml },
           }
         }
-      const webFallback = await isolatedWebSearch.execute({ query: '鸣潮 最新角色' })
+        const webFallback = await isolatedWebSearch.execute({ query: '鸣潮 最新角色' })
         check('agent web_search falls back to lightweight HTTP when API search unavailable', typeof webFallback === 'string' && webFallback.includes('轻量 HTTP 搜索') && webFallback.includes('未启动 Chromium') && webFallback.includes('已搜索'))
         check('agent web_search uses planned HTTP query candidates', httpSearchUrls.some(url => decodeURIComponent(url).includes('官方')))
         check('agent web_search skips browser fallback by default', browserSearchCalls.length === 0)
+        const retryReadUrls = []
+        let searchPageCount = 0
+        global.fetch = async (url) => {
+          retryReadUrls.push(String(url))
+          if (String(url).includes('duckduckgo') || String(url).includes('bing.com/search')) {
+            searchPageCount++
+            return {
+              ok: true,
+              headers: { get: () => 'text/html' },
+              async text() {
+                return searchPageCount === 1
+                  ? '<html><body><a href="https://example.com/too-short">3.3版本更新内容详解</a></body></html>'
+                  : '<html><body><a href="https://wutheringwaves.kurogames.com/news/deep">3.3版本更新内容详解</a></body></html>'
+              },
+            }
+          }
+          if (String(url).includes('too-short')) {
+            return { ok: true, headers: { get: () => 'text/html' }, async text() { return '<main>短</main>' } }
+          }
+          return {
+            ok: true,
+            headers: { get: () => 'text/html' },
+            async text() { return '<main>库洛官方公告正文：3.3版本更新内容详解里包含新共鸣者、卡池安排、版本前瞻与活动信息，正文长度足够让轻量 HTTP 深读确认来源可靠。</main>' },
+          }
+        }
+        const retryHttpResult = await isolatedWebSearch.execute({ query: '某游戏最新角色是谁' })
+        check('agent web_search keeps trying after candidate page read failure', retryHttpResult.includes('打开候选网页继续读取') && retryHttpResult.includes('库洛官方公告正文') && retryReadUrls.some(url => url.includes('too-short')), retryHttpResult)
+        let searchOnlyCount = 0
+        global.fetch = async (url) => {
+          retryReadUrls.push(String(url))
+          if (String(url).includes('duckduckgo') || String(url).includes('bing.com/search')) {
+            searchOnlyCount++
+            return {
+              ok: true,
+              headers: { get: () => 'text/html' },
+              async text() {
+                return '<html><body><a href="https://wutheringwaves.kurogames.com/news/summary-only">3.3版本更新内容详解</a></body></html>'
+              },
+            }
+          }
+          return { ok: true, headers: { get: () => 'text/html' }, async text() { return '<main>短</main>' } }
+        }
+        const searchOnlyResult = await isolatedWebSearch.execute({ query: '某游戏最新角色是谁' })
+        check('agent web_search does not stop at first summary-only candidate', searchOnlyCount >= 3 && searchOnlyResult.includes('搜索页摘要级结果'), searchOnlyResult)
       fs.writeFileSync(isolatedConstants.PROVIDER_FILE, 'dashscope')
       fs.writeFileSync(isolatedConstants.MODEL_FILE, 'qwen3.5-plus')
       fs.writeFileSync(isolatedConstants.DASHSCOPE_KEY_FILE, 'test-key')
@@ -1473,6 +1554,7 @@ async function main() {
         fs.writeFileSync(isolatedConstants.SEARCH_ENABLED_FILE, 'false')
         isolatedRuntimeConfig.resetConfigCache()
         process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH = '1'
+        process.env.DONGXUELIAN_AGENT_BROWSER_MIN_AVAILABLE_MB = '1'
         browserSearchCalls.length = 0
         global.fetch = async () => { throw new Error('mock http search down') }
         const browserEnabledFallback = await isolatedWebSearch.execute({ query: '鸣潮最新角色是谁' })
@@ -1483,6 +1565,8 @@ async function main() {
         else process.env.DONGXUELIAN_AGENT_BROWSER_SEARCH = originalBrowserSearchEnv
         if (originalAllowChromiumEnv === undefined) delete process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH
         else process.env.DONGXUELIAN_ALLOW_CHROMIUM_SEARCH = originalAllowChromiumEnv
+        if (originalBrowserMinAvailableEnv === undefined) delete process.env.DONGXUELIAN_AGENT_BROWSER_MIN_AVAILABLE_MB
+        else process.env.DONGXUELIAN_AGENT_BROWSER_MIN_AVAILABLE_MB = originalBrowserMinAvailableEnv
       }
     } finally {
       isolatedBrowserAction.execute = originalBrowserActionExecute
@@ -1573,11 +1657,21 @@ async function main() {
     { userId: 'userA', role: 'user', speakerName: 'Alice', content: 'first', messageId: 'm1', replyToId: '', mentionUserIds: [], ts: 1 },
     { userId: 'userB', role: 'user', speakerName: 'Bob', content: 'second', messageId: 'm2', replyToId: 'm1', mentionUserIds: ['userA'], ts: 2 },
     { userId: 'userC', role: 'user', speakerName: 'Carol', content: 'third', messageId: 'm3', replyToId: 'm2', mentionUserIds: [], ts: 3 },
+    { userId: 'bot', role: 'assistant', speakerName: '东雪莲', content: 'bot-self-reply', messageId: 'bot-m1', replyToId: 'm3', mentionUserIds: [], ts: 4 },
   ])
   check('findChannelMessageById returns message', conv.findChannelMessageById('guildA', 'm1').content === 'first')
   checkEqual('collectReplyChain follows message id', conv.collectReplyChain('guildA', 'm2')[0].content, 'second')
   const replyChain = conv.collectReplyChain('guildA', 'm3').map(item => item.content)
   checkEqual('collectReplyChain follows parent reply ids', replyChain.join(' > '), 'third > second > first')
+  const selfQuoteInfo = conv.getQuoteInfo(makeSession({ guildId: 'guildA', channelId: 'chanA', userId: 'userA', quote: { content: 'bot-self-reply', messageId: 'bot-m1' } }), { replyToId: 'bot-m1' })
+  check('quote info marks assistant message id as self quote', selfQuoteInfo.isSelf && selfQuoteInfo.matchedMessage?.role === 'assistant', JSON.stringify(selfQuoteInfo))
+  const selfSharedNote = conv.getSharedContextNote(convSession, 'userA', { replyToId: 'bot-m1' })
+  check('shared context keeps focused assistant reply when quoted', selfSharedNote.includes('bot-self-reply'), selfSharedNote)
+  const mergedConversation = conv.mergeConversationMessages(
+    [{ role: 'user', content: 'old' }, { role: 'assistant', content: 'old-reply' }],
+    [{ role: 'user', content: 'old' }, { role: 'assistant', content: 'old-reply' }, { role: 'user', content: 'cached' }]
+  )
+  checkEqual('conversation merge preserves pending memory tail', mergedConversation.map(item => item.content).join(' > '), 'old > old-reply > cached')
   conv.channelSharedCache.set('guildLoop', [
     { userId: 'userA', role: 'user', speakerName: 'Alice', content: 'loop-a', messageId: 'loop-a', replyToId: 'loop-b', mentionUserIds: [], ts: 1 },
     { userId: 'userB', role: 'user', speakerName: 'Bob', content: 'loop-b', messageId: 'loop-b', replyToId: 'loop-a', mentionUserIds: [], ts: 2 },

@@ -242,6 +242,7 @@ function findRelevantAgentSkills(query = '', options = {}) {
       }
       if (/前端|dashboard|后台|控制台|源码|代码|文件|目录|agent|skill|技能|浏览器|browser|pdf|ppt|docx/i.test(query) && skill.name === 'QA_source_index') score += 6
       if (/浏览器|网页|页面|截图|browser|cdp/i.test(query) && /^browser_/i.test(skill.name)) score += 8
+      if (/联网|搜索|搜|查(一下|找)?|最新|新闻|资讯|官网|官方|来源|网页|资料|web[_-]?search|search/i.test(query) && skill.name === 'web_search_strategy') score += 12
       if (/ppt|pptx|演示|幻灯片/i.test(query) && /^pptx$/i.test(skill.name)) score += 8
       if (/pdf/i.test(query) && /^pdf$/i.test(skill.name)) score += 8
       if (/docx|word|文档/i.test(query) && /^docx$/i.test(skill.name)) score += 8

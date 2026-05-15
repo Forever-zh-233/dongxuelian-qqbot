@@ -11,6 +11,7 @@ const { runHttpSearch } = require('../http-search')
 const API_SEARCH_TIMEOUT_MS = 12000
 const BROWSER_SEARCH_QUERY_LIMIT = 2
 const CHROMIUM_SEARCH_ENV = 'DONGXUELIAN_AGENT_BROWSER_SEARCH'
+const BROWSER_SEARCH_MIN_AVAILABLE_MB = 700
 function searchWithTimeout(promise, timeoutMs, label) {
   let timer = null
   return Promise.race([
@@ -61,6 +62,24 @@ function isBrowserSearchEnabled() {
   return isEnvEnabled(CHROMIUM_SEARCH_ENV) || isEnvEnabled('DONGXUELIAN_ALLOW_CHROMIUM_SEARCH')
 }
 
+function getAvailableMemoryMb() {
+  try {
+    const os = require('os')
+    return Math.floor(os.freemem() / 1024 / 1024)
+  } catch {
+    return 0
+  }
+}
+
+function getBrowserSearchBlockReason() {
+  const minMb = parseInt(process.env.DONGXUELIAN_AGENT_BROWSER_MIN_AVAILABLE_MB || '', 10) || BROWSER_SEARCH_MIN_AVAILABLE_MB
+  const availableMb = getAvailableMemoryMb()
+  if (availableMb > 0 && availableMb < minMb) {
+    return `Chromium 浏览器兜底已跳过：当前可用内存约 ${availableMb}MB，低于安全阈值 ${minMb}MB。`
+  }
+  return ''
+}
+
 async function browserSearch(queries, reason) {
   const browserAction = require('./browser-action')
   const results = []
@@ -87,15 +106,17 @@ async function fallbackSearch(queries, reason) {
   const httpResult = await runHttpSearch(queries)
   if (httpResult.ok) return `${reason}\n已改用轻量 HTTP 搜索（未启动 Chromium）。\n${httpResult.text}`
   if (isBrowserSearchEnabled()) {
+    const blockReason = getBrowserSearchBlockReason()
+    if (blockReason) return `${reason}\n已改用轻量 HTTP 搜索（未启动 Chromium）。\n${httpResult.text}\n${blockReason}`
     return browserSearch(queries, `${reason}\n轻量 HTTP 搜索未拿到可靠结果，已按 ${CHROMIUM_SEARCH_ENV}=1 启用 Chromium 浏览器兜底。`)
   }
-  return `${reason}\n${httpResult.text}\n为避免低内存服务器 OOM，web_search 默认跳过 Chromium 浏览器搜索。若确需浏览器兜底，请设置 ${CHROMIUM_SEARCH_ENV}=1，并确保内存充足。`
+  return `${reason}\n已改用轻量 HTTP 搜索（未启动 Chromium）。\n${httpResult.text}\n为避免低内存服务器 OOM，web_search 默认跳过 Chromium 浏览器搜索。若确需浏览器兜底，请设置 ${CHROMIUM_SEARCH_ENV}=1，并确保内存充足。`
 }
 
 module.exports = {
   definition: {
     name: 'web_search',
-    description: '联网搜索最新信息。用户问实时新闻、天气、游戏更新、最新资讯时使用；API 搜索不可用时内部降级到轻量 HTTP 搜索，默认不会启动 Chromium。',
+    description: '联网搜索最新信息。用户问实时新闻、天气、游戏更新、最新资讯时使用；API 搜索不可用时内部降级到轻量 HTTP 搜索，并优先打开可信候选页正文；默认不会启动 Chromium。',
     parameters: {
       type: 'object',
       properties: {
@@ -138,4 +159,6 @@ module.exports = {
   },
   dangerous: false,
   defaultChannels: ['dashboard', 'qq'],
+  getAvailableMemoryMb,
+  getBrowserSearchBlockReason,
 }

@@ -242,14 +242,15 @@ async function sendReply(ctx, session, reply, isRandom = false, options = {}) {
       //     .replace(new RegExp(esc, 'g'), '你')
       // }
     try {
-      await session.send(i === 0 ? quotePrefix + part : part)
+      const sentResult = await session.send(i === 0 ? quotePrefix + part : part)
+      const sentMessageId = sentResult && (sentResult.messageId || sentResult.message_id || sentResult.id)
+      saveSharedChannelTurn(session, '东雪莲', part, 'assistant', { messageId: sentMessageId || '' })
     } catch (sendError) {
       sendError.sentParts = sentParts
       ctx.logger('dongxuelian-ai').warn(`sendReply failed: ${sendError?.message || sendError}`)
       throw sendError
     }
     sentParts++
-    saveSharedChannelTurn(session, '东雪莲', part, 'assistant')
     if (i < parts.length - 1) {
       await sleep(getRandomDelayMs())
     }

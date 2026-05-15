@@ -23,6 +23,7 @@ const WUWA_RE = /(?:鸣潮|wuthering\s*waves|wutheringwaves|库洛|kuro)/i
 const MINECRAFT_RE = /(?:我的世界|minecraft|mojang)/i
 const LATEST_ROLE_RE = /(?:最新|新|当前|现在).{0,8}(?:角色|共鸣者|卡池)|(?:角色|共鸣者).{0,8}(?:最新|新|是谁)/i
 const LATEST_VERSION_RE = /(?:最新|当前|现在|更新|版本|update|release|snapshot|pre-release|正式版).{0,12}(?:版本|更新|版|version|update|release)|(?:版本|version).{0,12}(?:最新|当前|现在)/i
+const GENERAL_LATEST_RE = /(?:最新|当前|现在|今天|新闻|资讯|公告|版本|更新|角色|卡池|release|released|update|latest|news|official|source)/i
 
 function cleanExplicitSearchQuery(text = '') {
   return String(text || '')
@@ -37,24 +38,35 @@ function isWuwaLatestRoleQuery(query = '') {
   return WUWA_RE.test(value) && LATEST_ROLE_RE.test(value)
 }
 
+function pushSearchQuery(queries, value) {
+  const query = String(value || '').replace(/\s+/g, ' ').trim()
+  if (query) queries.push(query)
+}
+
+function isMinecraftUpdateQuery(query = '') {
+  const value = String(query || '')
+  return MINECRAFT_RE.test(value) && /(?:最新|当前|现在|更新|版本|update|release|snapshot|pre-release|正式版|latest|version)/i.test(value)
+}
+
 function buildSearchQueries(rawQuery = '') {
   const query = cleanExplicitSearchQuery(rawQuery) || String(rawQuery || '').trim().slice(0, 180)
   const queries = []
   if (isWuwaLatestRoleQuery(query)) {
-    queries.push(
-      '鸣潮 最新角色 官方 公告 共鸣者',
-      '鸣潮 新角色 site:kurogames.com',
-      '鸣潮 新共鸣者 官方 微博 bilibili'
-    )
+    pushSearchQuery(queries, '鸣潮 最新角色 官方 公告 共鸣者')
+    pushSearchQuery(queries, '鸣潮 新角色 site:kurogames.com')
+    pushSearchQuery(queries, '鸣潮 新共鸣者 官方 微博 bilibili')
   }
-  if (MINECRAFT_RE.test(query) && LATEST_VERSION_RE.test(query)) {
-    queries.push(
-      'Minecraft latest update official release notes',
-      'Minecraft latest version site:minecraft.net article',
-      'Minecraft Java Edition latest release official'
-    )
+  if (isMinecraftUpdateQuery(query)) {
+    pushSearchQuery(queries, 'Minecraft latest update official release notes')
+    pushSearchQuery(queries, 'Minecraft latest version site:minecraft.net article')
+    pushSearchQuery(queries, 'Minecraft Java Edition latest release official')
   }
-  if (query) queries.push(query)
+  if (!isWuwaLatestRoleQuery(query) && !isMinecraftUpdateQuery(query) && GENERAL_LATEST_RE.test(query)) {
+    pushSearchQuery(queries, `${query} 官方 公告 来源`)
+    pushSearchQuery(queries, `${query} 最新 官方`)
+    if (/[a-z]/i.test(query)) pushSearchQuery(queries, `${query} official source latest`)
+  }
+  if (query) pushSearchQuery(queries, query)
   const seen = new Set()
   return queries.filter(item => {
     const key = item.toLowerCase()
@@ -62,6 +74,40 @@ function buildSearchQueries(rawQuery = '') {
     seen.add(key)
     return true
   }).slice(0, 4)
+}
+
+function getDirectSearchCandidates(query = '') {
+  const value = String(query || '')
+  const candidates = []
+  if (WUWA_RE.test(value)) {
+    candidates.push(
+      {
+        title: '鸣潮官网新闻公告',
+        url: 'https://wutheringwaves.kurogames.com/zh-cn/main/news',
+        snippet: '鸣潮官方新闻、公告、版本更新与共鸣者信息入口。',
+      },
+      {
+        title: 'Wuthering Waves Official News',
+        url: 'https://wutheringwaves.kurogames.com/en/main/news',
+        snippet: 'Official Wuthering Waves news and update announcements.',
+      }
+    )
+  }
+  if (MINECRAFT_RE.test(value)) {
+    candidates.push(
+      {
+        title: 'Minecraft Official News',
+        url: 'https://www.minecraft.net/en-us/articles',
+        snippet: 'Minecraft official news, release notes and update articles.',
+      },
+      {
+        title: 'Minecraft Release Changelogs',
+        url: 'https://feedback.minecraft.net/hc/en-us/sections/360001186971-Release-Changelogs',
+        snippet: 'Official Minecraft release changelogs and version notes.',
+      }
+    )
+  }
+  return candidates
 }
 
 function getSearchHostname(url = '') {
@@ -109,7 +155,9 @@ function sortSearchResults(results = [], query = '') {
 module.exports = {
   cleanExplicitSearchQuery,
   buildSearchQueries,
+  getDirectSearchCandidates,
   isWuwaLatestRoleQuery,
+  isMinecraftUpdateQuery,
   getSearchHostname,
   scoreSearchResult,
   isLowQualitySearchResult,

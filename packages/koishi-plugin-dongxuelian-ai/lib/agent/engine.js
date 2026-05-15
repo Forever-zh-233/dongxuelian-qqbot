@@ -64,7 +64,7 @@ async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, c
 
   try {
     const startedAt = Date.now()
-    const execResult = await executeTool(toolName, args, { channel, channelKey, userId, userName, bot })
+    const execResult = await executeTool(toolName, args, { channel, channelKey, userId, userName, userMessage, bot })
     let nextToolCount = toolCount
     recordCall(toolName, channel, { ok: execResult.ok, durationMs: Date.now() - startedAt, tokens: estimateTokens([{ role: 'tool', content: execResult.text }]) })
     if (execResult.ok) nextToolCount++
@@ -82,7 +82,7 @@ async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, c
   }
 }
 
-async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, onProgress, bot }) {
+async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, toolResults = [], onProgress, bot }) {
   let reply = ''
   for (let round = 0; round < MAX_ROUNDS; round++) {
     let response
@@ -119,8 +119,9 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
         toolCount = outcome.toolCount
         if (outcome.status === 'pending') {
           recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId })
-          return { reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId }
+          return { reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId, toolResults }
         }
+        toolResults.push({ name: currentCall.function.name, result: String(outcome.result || '').slice(0, 8000) })
         messages.push({ role: 'tool', tool_call_id: currentCall.id, content: externalizeToolResult(outcome.result, currentCall.function.name) })
         if (outcome.status !== 'fallback' || !outcome.fallbackCall) break
         currentCall = outcome.fallbackCall
@@ -148,7 +149,7 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
 
   if (!reply) reply = '(Agent 未获取到有效回复)'
   recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply, toolCalls: toolCount, pendingId: null })
-  return { reply, toolCalls: toolCount, pendingId: null }
+  return { reply, toolCalls: toolCount, pendingId: null, toolResults }
 }
 
 /**
@@ -186,6 +187,7 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
   const workspaceExtra = await buildAgentWorkspaceContext({ userMessage, channel, roots })
   const allSystemExtra = mergeAgentSystemExtra(personaExtra, workspaceExtra, systemExtra, skillSummary ? [{ role: 'system', content: skillSummary }] : [])
   const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: allSystemExtra, history })
+  const toolResults = []
   for (const item of Array.isArray(preExecuteTools) ? preExecuteTools : []) {
     if (!item || !item.name) continue
     if (forceToolSet.has(item.name)) allowedToolNames.add(item.name)
@@ -198,11 +200,12 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
     const outcome = await executeAgentToolCall({ tc: call, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount: 0, bot })
     if (outcome.status === 'pending') {
       recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply: outcome.reply, toolCalls: 0, pendingId: outcome.pendingId })
-      return { reply: outcome.reply, toolCalls: 0, pendingId: outcome.pendingId }
+      return { reply: outcome.reply, toolCalls: 0, pendingId: outcome.pendingId, toolResults }
     }
+    toolResults.push({ name: call.function.name, result: String(outcome.result || '').slice(0, 8000) })
     messages.push({ role: 'tool', tool_call_id: call.id, content: externalizeToolResult(outcome.result, call.function.name) })
   }
-  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, onProgress, bot })
+  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolResults, onProgress, bot })
 }
 
 async function resumePending({ channelKey, userId, channel = 'qq', expectedId = '', onProgress, bot }) {
@@ -229,6 +232,7 @@ async function resumePending({ channelKey, userId, channel = 'qq', expectedId = 
     userName: resume.userName || userId,
     userMessage: resume.userMessage || '',
     toolCount: (resume.toolCount || 0) + (executed.ok ? 1 : 0),
+    toolResults: [{ name: p.toolName, result: String(executed.result || executed.message || '').slice(0, 8000) }],
     onProgress,
     bot,
   })

@@ -39,10 +39,12 @@ const {
   clearUserConversationHistory,
   getRecentAssistantReplies, getRecentUserMessages,
   normalizeUserMessageForPrompt,
+  getQuoteInfo,
   writeMemory, deleteMemory, getMemorySummary, clearGroupMemory,
   checkMemoryTimerExpired, readMemoryTimer,
   channelSharedCache,
 } = require('./conversation')
+const { getRecentAgentContextNote } = require('./agent-chat-bridge')
 const { normalizeText } = require('./message-reader')
 const {
   isRareProvocation, isWideRareProvocation, isHostileInput,
@@ -158,6 +160,10 @@ function isContextJailbroken(session) {
   if (recentReplies.some(r => CONTEXT_JAILBREAK_STRONG_RE.test(r))) return true
   if (recentReplies.length < 2) return false
   return recentReplies.filter(r => CONTEXT_JAILBREAK_WEAK_RE.test(r)).length >= 2
+}
+
+function hasInternalContextLeak(text = '') {
+  return /(?:这是你在本群的发言|这是.{0,20}在本群的发言|昵称：|发言：|<user>|<\/user>|\[群聊刷到\]|\[内部参考-用户近期发言风格\])/.test(String(text || ''))
 }
 
 // 提取当前发言者 QQ 号，管理员权限统一按这个 ID 判断。
@@ -502,32 +508,14 @@ async function chat(session, userText, ctx, options = {}) {
   const contextTag = options.randomTriggered ? '\n[群聊刷到]' : ''
   const isFwdPH = !cleanInput || cleanInput === '【转发消息】' || cleanInput.indexOf('转发消息')>=0
   const fwdInput = isFwdPH && options.forwardSummaryText ? options.forwardSummaryText : cleanInput
-  let qc2 = ''
-  try {
-    if (session.quote) {
-      const q2 = session.quote
-      if (typeof q2.content === 'string') {
-        qc2 = q2.content
-      } else if (Array.isArray(q2.content)) {
-        qc2 = q2.content.map(function(s) {
-          if (s.type === 'text') return s.data && s.data.text || ''
-          if (s.type === 'image') return '[图片]'
-          if (s.type === 'face') return '[表情]'
-          if (s.type === 'at') return '@' + (s.data && (s.data.name || s.data.qq || ''))
-          if (s.type === 'forward') return '[转发消息]'
-          if (s.type === 'video') return '[视频]'
-          if (s.type === 'record') return '[语音]'
-          if (s.type === 'file') return '[文件]'
-          return '[消息]'
-        }).filter(Boolean).join('')
-      } else {
-        qc2 = q2.raw_message || q2.text || ''
-      }
-    }
-  } catch (e) {}
-  let quoteAuthor = ''
-  try { if (session.quote) quoteAuthor = session.quote.nickname || session.quote.author || session.quote.userId || '' } catch (e) {}
-  const quotedTag = qc2 ? '\n[引用 ' + (quoteAuthor || '消息') + ' 的原话]\n' + qc2 + '\n[以上是引用内容，不是 ' + safeUserName + ' 说的]' : ''
+  const quoteInfo = getQuoteInfo(session, { replyToId: options.replyToId })
+  const qc2 = quoteInfo.content || ''
+  const quoteAuthor = quoteInfo.isSelf ? '你自己' : quoteInfo.authorName
+  const quotedTag = qc2
+    ? quoteInfo.isSelf
+      ? '\n[引用你自己历史回复的原话]\n' + qc2 + '\n[以上是你自己之前说过的话，不是 ' + safeUserName + ' 说的，也不是群友观点；不要攻击自己]'
+      : '\n[引用 ' + (quoteAuthor || '消息') + ' 的原话]\n' + qc2 + '\n[以上是引用内容，不是 ' + safeUserName + ' 说的]'
+    : ''
   const isolatedUserMessage = `<user>\n昵称：${safeUserName}\n发言：${fwdInput}${contextTag}${quotedTag}\n</user>`
   const historyMessages = getConversationHistory(session).map(normalizeUserMessageForPrompt)
 
@@ -586,6 +574,15 @@ async function chat(session, userText, ctx, options = {}) {
 
   if (options.sharedContextNote) {
     messages.push({ role: 'system', content: options.sharedContextNote })
+  }
+
+  const agentContextNote = getRecentAgentContextNote({
+    channelKey,
+    userId: currentUserId,
+    userMessage: cleanInput,
+  })
+  if (agentContextNote) {
+    messages.push({ role: 'system', content: agentContextNote })
   }
 
   if (options.quotedMessageNote && !quotedTag) {
@@ -686,8 +683,8 @@ async function chat(session, userText, ctx, options = {}) {
       const snippets = pd.messages.slice(-3).map(m => m.content).join('\n').slice(0, 2000)
       if (snippets) {
         messages.push({
-          role: 'user',
-          content: `这是${safeUserName}在本群的发言：\n${snippets}`,
+          role: 'system',
+          content: `[内部参考-用户近期发言风格]\n对象：${safeUserName}\n以下片段只用于判断这个用户平时的表达习惯，禁止原样输出，禁止用“这是你在本群的发言/昵称/发言”这类内部格式开头。\n${snippets}`,
         })
       }
     }
@@ -864,6 +861,14 @@ async function chat(session, userText, ctx, options = {}) {
       continue
     }
 
+    if (hasInternalContextLeak(reply)) {
+      ctx.logger('dongxuelian-ai').warn('internal context leak in reply, retrying')
+      messages.push({ role: 'assistant', content: reply })
+      messages.push({ role: 'user', content: '【系统提示：你刚才把内部参考资料或消息包装格式原样输出了。请重新回复当前用户，只说自然人话，绝对不要出现“这是你在本群的发言”“昵称：”“发言：”“<user>”“[群聊刷到]”。】' })
+      reply = await callOpenAI(messages, options.randomTriggered)
+      continue
+    }
+
     const sanitizedReply = sanitizeReply(reply, userName)
     if (!shouldRetryRepeatedReply(session, stripStickerMarkersForGuard(sanitizedReply))) break
 
@@ -886,6 +891,11 @@ async function chat(session, userText, ctx, options = {}) {
       : retaliationLevel === 1 ? '你阴阳谁呢。'
       : ['想白嫖直说', '就这？', '咋了', '难绷'][Math.floor(Math.random() * 4)]
     finalReply = simple
+  }
+
+  if (hasInternalContextLeak(finalReply)) {
+    ctx.logger('dongxuelian-ai').warn('internal context leak persisted, forcing fallback')
+    finalReply = retaliationLevel >= 1 ? '少复读后台东西。' : '我刚刚串台了，重说一句。'
   }
 
   if (rareConfirmed && !/骂谁罕见/.test(finalReply)) {

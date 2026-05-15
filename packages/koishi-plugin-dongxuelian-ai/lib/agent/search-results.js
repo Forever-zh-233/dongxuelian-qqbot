@@ -66,6 +66,16 @@ function hasQuerySignal(item = {}, query = '') {
   return terms.some(term => haystack.includes(term.toLowerCase())) || hasTrustedSearchSignal(item, query)
 }
 
+function getResultDomainSignal(item = {}) {
+  try {
+    const host = new URL(String(item.url || '')).hostname.replace(/^www\./i, '')
+    if (/\.(gov|edu)$/i.test(host)) return true
+    if (/(?:official|news|support|developer|docs|blog|help|changelog|release|minecraft|mojang|kurogames|wutheringwaves|bilibili|weibo|taptap|gamekee)/i.test(host)) return true
+  } catch {}
+  const text = `${item.title || ''}\n${item.snippet || ''}\n${item.text || ''}`
+  return /(?:官方|公告|新闻|资讯|版本|更新|前瞻|release|released|update|latest|changelog|patch notes|source|official)/i.test(text)
+}
+
 function normalizeSearchCandidate(item = {}) {
   const title = String(item.title || '').replace(/\s+/g, ' ').trim()
   const url = normalizeResultUrl(item.url)
@@ -86,7 +96,7 @@ function isUsefulSearchResult(item = {}, query = '') {
   if (SEARCH_INTERNAL_URL_RE.test(normalized.url)) return false
   if (!/^https?:\/\//i.test(normalized.url)) return false
   if (isLowQualitySearchResult(normalized)) return false
-  return hasQuerySignal(normalized, query)
+  return hasQuerySignal(normalized, query) || getResultDomainSignal(normalized)
 }
 
 function rankSearchCandidates(candidates = [], query = '', limit = 8) {
@@ -123,6 +133,7 @@ module.exports = {
   normalizeSearchCandidate,
   isUsefulSearchResult,
   hasQuerySignal,
+  getResultDomainSignal,
   rankSearchCandidates,
   formatSearchResults,
   buildSearchFailureText,
