@@ -41,7 +41,7 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = 1500
 }
 
 export function setAdminToken(token: string) {
-  localStorage.setItem(SERVER_TOKEN_KEY, JSON.stringify({ token, expires: Date.now() + 3600000 }))
+  localStorage.setItem(SERVER_TOKEN_KEY, JSON.stringify({ token, expires: Date.now() + 43200000 }))
   localStorage.removeItem(LEGACY_ADMIN_TOKEN_KEY)
 }
 

@@ -56,10 +56,12 @@ function useAgentData() {
   const [personas, setPersonas] = useState<any[]>([])
   const [persona, setPersona] = useState<any>(null)
   const [error, setError] = useState('')
+  const [adminRequired, setAdminRequired] = useState(false)
 
   async function refresh() {
     setLoading(true)
     setError('')
+    setAdminRequired(false)
     const [cfg, pnd, ses, sta, que, guard, planRes, cronRes, pushRes, envRes, personaRes] = await Promise.all([
       api.getConfig(),
       api.pending(),
@@ -74,6 +76,7 @@ function useAgentData() {
       api.personas(),
     ])
     if (cfg.ok) setConfig(cfg.data)
+    else if (cfg.code === 'ADMIN_REQUIRED') setAdminRequired(true)
     else setError(cfg.message || cfg.data?.message || '加载 Agent 配置失败')
     if (pnd.ok) setPending(pnd.data?.pending || [])
     if (ses.ok) setSessions(ses.data?.sessions || [])
@@ -98,7 +101,7 @@ function useAgentData() {
   }
 
   useEffect(() => { refresh() }, [])
-  return { loading, config, setConfig, pending, sessions, stats, queue, shellGuard, plans, crons, cronHistory, pushLog, env, personas, persona, setPersona, error, refresh }
+  return { loading, config, setConfig, pending, sessions, stats, queue, shellGuard, plans, crons, cronHistory, pushLog, env, personas, persona, setPersona, error, adminRequired, refresh }
 }
 
 function AdminGate({ onVerified }: { onVerified: () => void }) {
@@ -128,6 +131,36 @@ function AdminGate({ onVerified }: { onVerified: () => void }) {
         {message && <span className="form-error">{message}</span>}
       </section>
     </main>
+  )
+}
+
+function AdminDialog({ onVerified }: { onVerified: () => void }) {
+  const [password, setPassword] = useState('')
+  const [message, setMessage] = useState('')
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    const result = await verifyAdmin(password)
+    if (result?.ok && result?.token) {
+      setAdminToken(result.token)
+      setAccessToken(result.accessToken || '')
+      onVerified()
+    } else {
+      setMessage(result?.message || '管理员验证失败')
+    }
+  }
+  return (
+    <div className="admin-dialog-backdrop" onClick={() => {}} onKeyDown={e => e.key === 'Escape' && onVerified()}>
+      <div className="admin-dialog-card" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+        <div className="brand-mark">莲</div>
+        <h2>管理员密码已过期</h2>
+        <p>请重新输入管理员密码以继续操作。</p>
+        <form onSubmit={submit}>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="管理员密码" autoFocus />
+          <button type="submit">验证</button>
+        </form>
+        {message && <span className="form-error">{message}</span>}
+      </div>
+    </div>
   )
 }
 
@@ -860,11 +893,16 @@ function SecurityPage({ shellGuard, config }: { shellGuard: any; config: any }) 
 function App() {
   const [verified, setVerified] = useState(() => !!localStorage.getItem('dashboard_server_token') || !!localStorage.getItem('dashboard_admin_token'))
   const [active, setActive] = useState<TabId>('chat')
+  const [showAdminDialog, setShowAdminDialog] = useState(false)
   const data = useAgentData()
+  useEffect(() => {
+    if (data.adminRequired) setShowAdminDialog(true)
+  }, [data.adminRequired])
   if (!verified) return <AdminGate onVerified={() => { setVerified(true); data.refresh() }} />
   const version = data.config?.config?.version || '1.1.5'
   return (
     <div className="shell">
+      {showAdminDialog && <AdminDialog onVerified={() => { setShowAdminDialog(false); data.refresh() }} />}
       <Sidebar active={active} setActive={setActive} version={String(version)} />
       <main className="workspace">
         <Topbar onRefresh={data.refresh} loading={data.loading} />

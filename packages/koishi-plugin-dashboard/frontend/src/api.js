@@ -13,8 +13,8 @@ function getAdminToken() {
 }
 
 function setAdminToken(token) {
-  // 1 小时有效期
-  const data = JSON.stringify({ token, expires: Date.now() + 3600000 })
+  // 12 小时有效期
+  const data = JSON.stringify({ token, expires: Date.now() + 43200000 })
   localStorage.setItem(SERVER_TOKEN_KEY, data)
   localStorage.removeItem(LEGACY_ADMIN_TOKEN_KEY)
 }
@@ -217,6 +217,6 @@ export async function fetchAgentSession(id) { return get('/agent/sessions/' + en
 export async function fetchGalleryImages() { return get('/gallery') }
 export async function uploadGalleryImage(data) { return post('/gallery', data, false, 60000) }
 export async function deleteGalleryImage(idOrIds) { return del('/gallery', Array.isArray(idOrIds) ? { ids: idOrIds } : { id: idOrIds }, true) }
-export async function updateGalleryImageStyle(id, foilStyle) { return put('/gallery/style', { id, foilStyle }, true) }
+export async function updateGalleryImageStyle(id, foilStyle) { return put('/gallery/style', { id, foilStyle }, false) }
 
 export async function fetchKeysUsage() { return get('/keys/usage') }

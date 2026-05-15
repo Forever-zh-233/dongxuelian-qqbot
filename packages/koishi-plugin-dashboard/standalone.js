@@ -4279,7 +4279,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/dashboard/api/gallery/style' && req.method === 'PUT') {
-    if (!requireAdmin(req, res)) return
     collectBody(req, res, (body) => {
       try {
         const { id, foilStyle } = JSON.parse(body || '{}')

@@ -663,3 +663,12 @@ pre {
 .completion-item.selected { background: #eef2ff; }
 .completion-label { font-weight: 600; }
 .completion-desc { color: #737373; font-size: .78em; }
+
+/* Admin Dialog */
+.admin-dialog-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: grid; place-items: center; z-index: 10001; }
+.admin-dialog-card { background: #fff; border-radius: 12px; padding: 32px 28px; max-width: 400px; width: 90%; box-shadow: 0 8px 30px rgba(0,0,0,.15); text-align: center; }
+.admin-dialog-card h2 { margin: 12px 0 4px; }
+.admin-dialog-card p { color: #737373; margin: 0 0 16px; font-size: .9em; }
+.admin-dialog-card form { display: flex; flex-direction: column; gap: 10px; }
+.admin-dialog-card input { padding: 10px 12px; border: 1px solid #d9dde3; border-radius: 8px; font-size: .95em; }
+.admin-dialog-card .form-error { color: #ef4444; font-size: .82em; }
