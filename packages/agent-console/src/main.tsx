@@ -200,7 +200,16 @@ function Topbar({ onRefresh, loading }: { onRefresh: () => void; loading: boolea
       </div>
       <div className="top-actions">
         <a href="/dashboard/" title="返回 Dashboard">Dashboard</a>
-        <a href="/dashboard/api/agent/config" title="查看配置 JSON">配置 JSON</a>
+        <button className="secondary" onClick={async () => {
+          const r = await api.getConfig()
+          if (r.ok) {
+            const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url; a.download = 'agent-config.json'; a.click()
+            URL.revokeObjectURL(url)
+          }
+        }}>配置 JSON</button>
         <button onClick={onRefresh} disabled={loading}>{loading ? '刷新中' : '刷新'}</button>
       </div>
     </header>
@@ -264,6 +273,7 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
   const [agentMode, setAgentMode] = useState(true)
   const [textareaRef, setTextareaRef] = useState<HTMLTextAreaElement | null>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [completion, setCompletion] = useState<{
     type: CompletionType
     query: string
@@ -385,7 +395,10 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
           <span>工具策略跟随 Agent 配置</span>
         </div>
       </div>
-      <div className="messages" ref={messagesRef}>
+      <div className="messages" ref={messagesRef} onScroll={e => {
+        const el = e.currentTarget
+        setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 200)
+      }}>
         {messages.length === 0 && <div className="empty">暂无对话</div>}
         {messages.map((message, index) => (
           <article key={index} className={'message ' + message.role}>
@@ -398,6 +411,11 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
           </article>
         ))}
       </div>
+      {showScrollBtn && (
+        <button className="scroll-bottom-btn" onClick={() => {
+          messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' })
+        }}>↓ 底部</button>
+      )}
       <div className="composer">
         <div className="composer-left">
           <button className={`mode-toggle ${mode}`} onClick={() => setMode(mode === 'plan' ? 'build' : 'plan')}>

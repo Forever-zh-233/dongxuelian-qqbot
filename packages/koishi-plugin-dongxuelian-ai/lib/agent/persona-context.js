@@ -127,17 +127,17 @@ function buildAgentPersonaContext(options = {}) {
   const messages = []
   if (agentMode) {
     messages.push(
-      { role: 'system', content: buildAgentPersonaSystemMessage({ personaName, personaContent: '', source, channel }) },
+      { role: 'system', content: '【Agent 直连模式】当前处于 Agent 工具调用模式，不使用角色人格。' },
       { role: 'system', content: AGENT_DIRECT_MODE_PROMPT },
     )
-  } else {
-    messages.push(
-      { role: 'system', content: buildAgentPersonaSystemMessage({ personaName, personaContent, source, channel }) },
-      { role: 'system', content: AGENT_GUARD_PROMPT },
-    )
+    return messages
   }
+  messages.push(
+    { role: 'system', content: buildAgentPersonaSystemMessage({ personaName, personaContent, source, channel }) },
+    { role: 'system', content: AGENT_GUARD_PROMPT },
+  )
   const lore = extractAgentPersonaLore(personaContent, personaName)
-  if (lore && lore !== 'none' && !agentMode) {
+  if (lore && lore !== 'none') {
     messages.push({
       role: 'system',
       content: `【Agent 人格 Lore 绑定】当前人格绑定 lore：${lore}。只有用户问题确实涉及相关世界观时才自然使用，不要机械复述设定。`,
