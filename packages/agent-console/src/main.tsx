@@ -1,9 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, setAccessToken, setAdminToken, verifyAdmin } from './api/client'
 import './styles.css'
 
 type TabId = 'chat' | 'inbox' | 'personas' | 'files' | 'skills' | 'tools' | 'plans' | 'cron' | 'stats' | 'runtime' | 'model' | 'env' | 'security'
+
+type RoundRecord = {
+  reasoning: string | null
+  toolCalls: Array<{ name: string; args: Record<string, any> }>
+  toolResults?: Array<{ name: string; result: string; ok: boolean }>
+}
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system'
@@ -11,7 +17,12 @@ type ChatMessage = {
   pendingId?: string
   id?: string
   pending?: boolean
+  rounds?: RoundRecord[]
 }
+
+type AgentMode = 'plan' | 'build'
+
+type CompletionType = 'command' | 'file' | 'skill' | null
 
 const tabs: Array<{ id: TabId; label: string; group: string }> = [
   { id: 'chat', label: '聊天', group: '主功能' },
@@ -168,6 +179,44 @@ function getPersonaHistoryKey(personaName = '') {
   return `agent_console_history:${key}`
 }
 
+function renderRounds(rounds: RoundRecord[]) {
+  if (!rounds || rounds.length === 0) return null
+  const toolRoundCount = rounds.filter(r => r.toolCalls && r.toolCalls.length > 0).length
+  const label = toolRoundCount > 0 ? `工具链（${toolRoundCount} 轮${rounds[rounds.length - 1]?.reasoning ? ' + 思考' : ''}）` : `思考（${rounds.length} 轮）`
+  return (
+    <details className="timeline">
+      <summary>{label}</summary>
+      {rounds.map((round, i) => (
+        <div key={i} className="timeline-round">
+          {round.reasoning && (
+            <details className="timeline-thinking">
+              <summary>思考过程</summary>
+              <pre>{round.reasoning}</pre>
+            </details>
+          )}
+          {round.toolCalls && round.toolCalls.map((tc, j) => (
+            <div key={j} className="timeline-tool">
+              <strong>{tc.name}</strong>
+              {round.toolResults && round.toolResults[j] && (
+                <pre className={round.toolResults[j].ok ? 'ok' : 'error'}>
+                  {round.toolResults[j].result.slice(0, 300)}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </details>
+  )
+}
+
+const COMMANDS = [
+  { label: '/plan', description: '创建计划', value: '/plan ' },
+  { label: '/approve', description: '确认工具', value: '/approve ' },
+  { label: '/reject', description: '拒绝工具', value: '/reject ' },
+  { label: '/status', description: '查看状态', value: '/status ' },
+]
+
 function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
   const personaName = persona?.dashboardPersona || ''
   const historyKey = getPersonaHistoryKey(personaName)
@@ -177,6 +226,18 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
   const [loadedHistoryKey, setLoadedHistoryKey] = useState(historyKey)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [mode, setMode] = useState<AgentMode>('build')
+  const [enableThinking, setEnableThinking] = useState(false)
+  const [agentMode, setAgentMode] = useState(true)
+  const [textareaRef, setTextareaRef] = useState<HTMLTextAreaElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
+  const [completion, setCompletion] = useState<{
+    type: CompletionType
+    query: string
+    items: Array<{ label: string; description: string; value: string }>
+    selectedIndex: number
+  } | null>(null)
+
   useEffect(() => {
     try { setMessages(JSON.parse(localStorage.getItem(historyKey) || '[]')) } catch { setMessages([]) }
     setLoadedHistoryKey(historyKey)
@@ -186,6 +247,11 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
     localStorage.setItem(historyKey, JSON.stringify(messages.slice(-30)))
     localStorage.setItem('agent_console_history', JSON.stringify(messages.slice(-30)))
   }, [historyKey, loadedHistoryKey, messages])
+  useEffect(() => {
+    if (messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight
+    }
+  }, [messages])
   async function send() {
     const text = input.trim()
     if (!text || sending) return
@@ -195,11 +261,11 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
     setInput('')
     setSending(true)
     try {
-      const result = await api.chat(text, history)
+      const result = await api.chat(text, history, enableThinking, agentMode)
       setMessages(prev => {
         const base = prev.filter(item => item.id !== pendingMessageId)
         const reply = result.ok ? (result.data?.reply || result.data?.result || result.data?.message || '(Agent 未返回内容)') : (result.message || result.data?.message || '请求失败')
-        return [...base, { role: 'assistant', content: reply, pendingId: result.data?.pendingId }]
+        return [...base, { role: 'assistant', content: reply, pendingId: result.data?.pendingId, rounds: result.data?.rounds || [] }]
       })
       refresh()
     } catch (error: any) {
@@ -211,9 +277,70 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
       setSending(false)
     }
   }
-  function keyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function onInputChange(text: string) {
+    setInput(text)
+    const cursorPos = textareaRef?.selectionStart || 0
+    const textBeforeCursor = text.slice(0, cursorPos)
+    const slashMatch = textBeforeCursor.match(/\/(\w*)$/)
+    const atMatch = textBeforeCursor.match(/@(\S*)$/)
+    const hashMatch = textBeforeCursor.match(/#(\w*)$/)
+    if (slashMatch) {
+      const query = slashMatch[1].toLowerCase()
+      const items = COMMANDS.filter(c => c.label.slice(1).startsWith(query))
+      setCompletion({ type: 'command', query, items, selectedIndex: 0 })
+    } else if (atMatch) {
+      setCompletion(null)
+    } else if (hashMatch) {
+      setCompletion(null)
+    } else {
+      setCompletion(null)
+    }
+  }
+  function selectCompletion(item: { value: string }) {
+    const cursorPos = textareaRef?.selectionStart || 0
+    const textBeforeCursor = input.slice(0, cursorPos)
+    const textAfterCursor = input.slice(cursorPos)
+    const match = textBeforeCursor.match(/\/\w*$/)
+    const newText = match ? textBeforeCursor.slice(0, match.index) + item.value + textAfterCursor : input + item.value
+    setInput(newText)
+    setCompletion(null)
+    setTimeout(() => textareaRef?.focus(), 0)
+  }
+  function onComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (completion && completion.items.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setCompletion({ ...completion, selectedIndex: Math.min(completion.selectedIndex + 1, completion.items.length - 1) })
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setCompletion({ ...completion, selectedIndex: Math.max(completion.selectedIndex - 1, 0) })
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        selectCompletion(completion.items[completion.selectedIndex])
+      } else if (event.key === 'Escape') {
+        setCompletion(null)
+      }
+      return
+    }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) send()
     if (event.key === 'Escape') setInput('')
+  }
+  function renderCompletion() {
+    if (!completion || completion.items.length === 0) return null
+    return (
+      <div className="completion-popup">
+        {completion.items.map((item, i) => (
+          <button
+            key={item.label}
+            className={`completion-item ${i === completion.selectedIndex ? 'selected' : ''}`}
+            onClick={() => selectCompletion(item)}
+          >
+            <span className="completion-label">{item.label}</span>
+            <span className="completion-desc">{item.description}</span>
+          </button>
+        ))}
+      </div>
+    )
   }
   return (
     <section className="chat-layout">
@@ -225,12 +352,13 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
           <span>工具策略跟随 Agent 配置</span>
         </div>
       </div>
-      <div className="messages">
+      <div className="messages" ref={messagesRef}>
         {messages.length === 0 && <div className="empty">暂无对话</div>}
         {messages.map((message, index) => (
           <article key={index} className={'message ' + message.role}>
             <div className="avatar">{message.role === 'user' ? '你' : message.role === 'assistant' ? '莲' : '…'}</div>
             <div className="bubble">
+              {message.role === 'assistant' && renderRounds(message.rounds)}
               <pre>{message.content}</pre>
               {message.pendingId && <span className="tag warn">等待确认 {message.pendingId}</span>}
             </div>
@@ -238,7 +366,23 @@ function ChatPage({ refresh, persona }: { refresh: () => void; persona: any }) {
         ))}
       </div>
       <div className="composer">
-        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={keyDown} placeholder="/plan、/approve、@文件、#技能" />
+        <div className="composer-left">
+          <button className={`mode-toggle ${mode}`} onClick={() => setMode(mode === 'plan' ? 'build' : 'plan')}>
+            {mode === 'plan' ? 'Plan' : 'Build'}
+          </button>
+          <label className="thinking-toggle">
+            <input type="checkbox" checked={agentMode} onChange={e => setAgentMode(e.target.checked)} />
+            <span>Agent</span>
+          </label>
+          <label className="thinking-toggle">
+            <input type="checkbox" checked={enableThinking} onChange={e => setEnableThinking(e.target.checked)} />
+            <span>思考</span>
+          </label>
+        </div>
+        <div className="composer-input-wrapper">
+          <textarea ref={setTextareaRef} value={input} onChange={e => onInputChange(e.target.value)} onKeyDown={onComposerKeyDown} placeholder="/plan、/approve、@文件、#技能" />
+          {renderCompletion()}
+        </div>
         <div className="composer-actions">
           <span>{input.length} 字</span>
           <button onClick={send} disabled={sending || !input.trim()}>{sending ? '发送中' : '发送'}</button>

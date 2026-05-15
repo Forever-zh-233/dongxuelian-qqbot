@@ -41,7 +41,8 @@ async function llmRoute(userText = '', channel = 'qq') {
     { role: 'user', content: `可用工具：${tools.join(', ')}\n消息：${String(userText).slice(0, 500)}` },
   ]
   try {
-    const result = await requestChatCompletions(prompt, config, { max_tokens: 5, _fallbackSet: 'lightweight' })
+    const resultObj = await requestChatCompletions(prompt, config, { max_tokens: 5, _fallbackSet: 'lightweight' })
+    const result = typeof resultObj === 'string' ? resultObj : resultObj.content
     return /^YES/i.test(String(result || '').trim())
       ? { useAgent: true, reason: 'llm' }
       : { useAgent: false, reason: 'llm' }
@@ -56,7 +57,7 @@ function buildExplicitSearchRunOptions(userText = '') {
   const queries = buildSearchQueries(query)
   const primaryQuery = queries[0] || query
   return {
-    systemExtra: [{ role: 'system', content: '用户明确要求联网搜索。必须先调用 web_search 获取最新信息；如 Skill 索引列出了 web_search_strategy，先读取该 Skill 的搜索策略。只能根据工具结果回答，不要凭记忆回答。候选页足够可信时，要以工具打开到的候选网页正文为主要依据；只有标题/摘要时必须降低确信度。若工具结果为空、明显不相关、或主要是素材/模板/图片/下载站，必须说“这次搜索没有拿到可靠结果”，并简要说明搜索链路问题，不要编造答案。用户追问“你怎么知道/是搜索到的吗”时，要诚实说明依据来自本轮工具结果。' }],
+    systemExtra: [{ role: 'system', content: '用户明确要求联网搜索。必须先调用 web_search 获取最新信息。如果第一轮搜索没拿到可靠结果（只有标题/首页、正文太短、全是百科/字典），不要直接放弃，从已有结果中提取新关键词（如角色名、版本号、活动名），换 query 再搜一次，最多再搜 2 轮。可信度分 ≥ 50 的结果必须打开正文。只能根据工具结果回答，不要凭记忆回答。候选页足够可信时，要以工具打开到的候选网页正文为主要依据；只有标题/摘要时必须降低确信度。若工具结果为空、明显不相关、或主要是素材/模板/图片/下载站，必须说”这次搜索没有拿到可靠结果”，并简要说明搜索链路问题，不要编造答案。用户追问”你怎么知道/是搜索到的吗”时，要诚实说明依据来自本轮工具结果。不要混淆不同来源的信息，每个角色的属性必须关联到具体来源链接。注意：工具内部已实现自动重试和关键词提取，如果工具返回的结果标注为”弱命中”或”未打开正文”，你仍然可以再次调用 web_search 并传入从上次结果中提取的新关键词。' }],
     forceTools: ['web_search'],
     preExecuteTools: [{ name: 'web_search', args: { query: primaryQuery, queries } }],
   }

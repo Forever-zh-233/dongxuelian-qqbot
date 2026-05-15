@@ -22,6 +22,7 @@ const { MAX_TOOL_ROUNDS } = require('../constants')
 
 const MAX_ROUNDS = MAX_TOOL_ROUNDS
 const MAX_TOOLS_PER_ROUND = 3
+const MAX_WEB_SEARCH_CALLS = 3
 
 function normalizeToolCall(toolName, args = {}) {
   return {
@@ -82,12 +83,13 @@ async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, c
   }
 }
 
-async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, toolResults = [], onProgress, bot }) {
+async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, toolResults = [], onProgress, bot, enableThinking = false }) {
   let reply = ''
+  const rounds = []
   for (let round = 0; round < MAX_ROUNDS; round++) {
     let response
     try {
-      response = await requestChatCompletions(messages, config, {}, tools)
+      response = await requestChatCompletions(messages, config, { _thinkingEnabled: enableThinking }, tools)
     } catch (error) {
       reply = `Agent 调用模型失败：${error.message || error}`
       break
@@ -95,9 +97,16 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
 
     if (typeof response === 'string') { reply = response; break }
 
+    if (response.type === 'text') {
+      reply = response.content || ''
+      rounds.push({ round, reasoning: enableThinking ? (response.reasoning || '') : '', toolCalls: [], toolResults: [] })
+      break
+    }
+
     const { tool_calls, message: assistantMsg } = response
     if (!tool_calls || tool_calls.length === 0) {
       reply = assistantMsg?.content || ''
+      rounds.push({ round, reasoning: enableThinking ? (response.reasoning || '') : '', toolCalls: [], toolResults: [] })
       break
     }
 
@@ -111,17 +120,38 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
       })),
     })
 
+    const roundToolCalls = activeToolCalls.map(tc => ({
+      id: tc.id,
+      name: tc.function.name,
+      args: (() => { try { return JSON.parse(tc.function.arguments || '{}') } catch { return {} } })(),
+    }))
+    const roundToolResults = []
+
     for (const tc of activeToolCalls) {
       let currentCall = tc
       let fallbackDepth = 0
+
+      // 多轮搜索限制：preExecuteTools + 循环中的 web_search 总次数超过上限时，阻止继续搜索
+      if (tc.function.name === 'web_search') {
+        const webSearchTotal = toolResults.filter(t => t.name === 'web_search').length + 1
+        if (webSearchTotal > MAX_WEB_SEARCH_CALLS) {
+          const blockMsg = `web_search 已调用 ${webSearchTotal - 1} 次。请基于现有搜索结果给出最佳回答，不要再调用搜索。`
+          roundToolResults.push({ name: 'web_search', result: blockMsg, status: 'done' })
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: externalizeToolResult(blockMsg, 'web_search') })
+          continue
+        }
+      }
       while (currentCall && fallbackDepth < 2) {
         const outcome = await executeAgentToolCall({ tc: currentCall, messages, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount, bot })
         toolCount = outcome.toolCount
         if (outcome.status === 'pending') {
+          rounds.push({ round, reasoning: response.reasoning || '', toolCalls: roundToolCalls, toolResults: roundToolResults })
           recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId })
-          return { reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId, toolResults }
+          return { reply: outcome.reply, toolCalls: toolCount, pendingId: outcome.pendingId, toolResults, rounds }
         }
-        toolResults.push({ name: currentCall.function.name, result: String(outcome.result || '').slice(0, 8000) })
+        const resultText = String(outcome.result || '').slice(0, 8000)
+        toolResults.push({ name: currentCall.function.name, result: resultText })
+        roundToolResults.push({ name: currentCall.function.name, result: resultText, status: outcome.status })
         messages.push({ role: 'tool', tool_call_id: currentCall.id, content: externalizeToolResult(outcome.result, currentCall.function.name) })
         if (outcome.status !== 'fallback' || !outcome.fallbackCall) break
         currentCall = outcome.fallbackCall
@@ -138,6 +168,8 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
       }
     }
 
+    rounds.push({ round, reasoning: response.reasoning || '', toolCalls: roundToolCalls, toolResults: roundToolResults })
+
     let estimated = estimateTokens(messages)
     if (estimated > 60000) {
       messages.splice(0, messages.length, ...await compactWithLLM(messages, config, requestChatCompletions))
@@ -149,7 +181,7 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
 
   if (!reply) reply = '(Agent 未获取到有效回复)'
   recordAgentSession({ channel, channelKey, userId, userName, userMessage, reply, toolCalls: toolCount, pendingId: null })
-  return { reply, toolCalls: toolCount, pendingId: null, toolResults }
+  return { reply, toolCalls: toolCount, pendingId: null, toolResults, rounds }
 }
 
 /**
@@ -174,7 +206,7 @@ function getForceToolSet(forceTools) {
   return new Set((Array.isArray(forceTools) ? forceTools : []).filter(name => toolRegistry[name]))
 }
 
-async function runAgent({ userMessage, userName, userId, channelKey, channel = 'qq', systemExtra = [], history = [], forceTools = [], preExecuteTools = [], onProgress, bot }) {
+async function runAgent({ userMessage, userName, userId, channelKey, channel = 'qq', systemExtra = [], history = [], forceTools = [], preExecuteTools = [], onProgress, bot, enableThinking = false, agentMode = false }) {
   if (!isChannelEnabled(channel)) return { reply: '(Agent 已关闭)', toolCalls: 0, pendingId: null }
   let tools = getToolDefinitions(channel)
   const forceToolSet = getForceToolSet(forceTools)
@@ -183,7 +215,7 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
   const config = await loadConfig()
   const roots = channel === 'dashboard' ? await getAgentPathAllowedRoots() : []
   const skillSummary = buildAgentSkillSummary(getEnabledSkills(), { query: userMessage })
-  const personaExtra = buildAgentPersonaContext({ channel, channelKey, userId })
+  const personaExtra = buildAgentPersonaContext({ channel, channelKey, userId, agentMode })
   const workspaceExtra = await buildAgentWorkspaceContext({ userMessage, channel, roots })
   const allSystemExtra = mergeAgentSystemExtra(personaExtra, workspaceExtra, systemExtra, skillSummary ? [{ role: 'system', content: skillSummary }] : [])
   const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: allSystemExtra, history })
@@ -205,7 +237,7 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
     toolResults.push({ name: call.function.name, result: String(outcome.result || '').slice(0, 8000) })
     messages.push({ role: 'tool', tool_call_id: call.id, content: externalizeToolResult(outcome.result, call.function.name) })
   }
-  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolResults, onProgress, bot })
+  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolResults, onProgress, bot, enableThinking })
 }
 
 async function resumePending({ channelKey, userId, channel = 'qq', expectedId = '', onProgress, bot }) {

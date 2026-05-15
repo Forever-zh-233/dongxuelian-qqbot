@@ -195,7 +195,8 @@ async function generateConversationSummary(key) {
   const text = targets.map(m => `${m.role}: ${m.content}`).join('\n').slice(0, 4000)
   try {
     const cfg = await loadConfig()
-    const result = await requestChatCompletions([{ role: 'system', content: '将以下对话压缩成一段200字以内的摘要，保留关键话题变化和重要信息。用中文，用第三人称。' }, { role: 'user', content: text }], cfg, { max_tokens: 300, _fallbackSet: 'lightweight' })
+    const resultObj = await requestChatCompletions([{ role: 'system', content: '将以下对话压缩成一段200字以内的摘要，保留关键话题变化和重要信息。用中文，用第三人称。' }, { role: 'user', content: text }], cfg, { max_tokens: 300, _fallbackSet: 'lightweight' })
+    const result = typeof resultObj === 'string' ? resultObj : resultObj.content
     if (result) { diskData.summary = result; diskData.summaryTotal = diskData.totalCount; writeConversationDisk(key, diskData) }
   } catch {}
 }
@@ -570,6 +571,7 @@ async function analyzeChannelSensitive(channelKey) {
         const apiKey = am.keyFile ? (await readTextFile(am.keyFile).catch(() => '') || cfg.apiKey).replace(/[\r\n]+/g, '') : cfg.apiKey
         if (!apiKey) continue
         result = await requestChatCompletions(messages, { model: am.model, baseURL: provDef.baseURL.replace(/\/+$/, ''), apiKey, provider: am.provider }, { max_tokens: 20, _fallbackSet: 'lightweight' })
+        result = typeof result === 'string' ? result : result.content
         if (result) break
       } catch {}
     }

@@ -3780,6 +3780,8 @@ const server = http.createServer(async (req, res) => {
       try {
         const data = JSON.parse(body || '{}')
         const message = String(data.message || '').trim()
+        const enableThinking = !!data.enableThinking
+        const agentMode = !!data.agentMode
         if (!message) return json(res, { ok: false, message: '消息不能为空' }, 400)
         const engine = require(path.join(AI_LIB, 'agent', 'engine'))
         const agentConfig = require(path.join(AI_LIB, 'agent', 'config')).getAgentConfig()
@@ -3798,6 +3800,8 @@ const server = http.createServer(async (req, res) => {
             channelKey: 'dashboard',
             channel: 'dashboard',
             history,
+            enableThinking,
+            agentMode,
             ...searchRunOptions,
           }),
         })

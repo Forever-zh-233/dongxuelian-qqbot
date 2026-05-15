@@ -626,3 +626,40 @@ pre {
     max-width: calc(100vw - 92px);
   }
 }
+
+/* Timeline UI */
+.timeline { margin-bottom: 8px; }
+.timeline summary { cursor: pointer; color: #6366f1; font-size: .82em; font-weight: 600; padding: 4px 0; }
+.timeline-round { margin-bottom: 6px; padding: 6px 8px; background: #f0f4ff; border-radius: 4px; border-left: 2px solid #6366f1; }
+.timeline-thinking { margin-bottom: 4px; }
+.timeline-thinking summary { cursor: pointer; color: #6366f1; font-size: .82em; font-weight: 600; }
+.timeline-thinking pre { font-size: .75em; color: #52525b; margin: 4px 0 0; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.timeline-tool { margin: 4px 0; }
+.timeline-tool strong { color: #f97316; font-size: .8em; }
+.timeline-tool pre { font-size: .73em; margin: 2px 0 0; white-space: pre-wrap; padding: 4px; background: #fefce8; border-radius: 4px; max-height: 100px; overflow: auto; }
+.timeline-tool pre.ok { border-left: 2px solid #22c55e; }
+.timeline-tool pre.error { border-left: 2px solid #ef4444; }
+
+/* Bubble inline scroll */
+.message.assistant .bubble { max-height: 380px; overflow-y: auto; position: relative; }
+.scroll-bottom-btn { display: none; position: sticky; bottom: 4px; float: right; padding: 2px 8px; font-size: .75em; background: #6366f1; color: white; border: 0; border-radius: 4px; cursor: pointer; z-index: 10; }
+.bubble.show-scroll-btn .scroll-bottom-btn { display: block; }
+
+/* Mode toggle */
+.composer-left { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.mode-toggle { font-size: .82em; padding: 4px 12px; border-radius: 6px; cursor: pointer; border: 1px solid #d9dde3; }
+.mode-toggle.plan { background: #eef2ff; color: #6366f1; border-color: #6366f1; }
+.mode-toggle.build { background: #fef2f2; color: #ef4444; border-color: #ef4444; }
+
+/* Thinking toggle */
+.thinking-toggle { display: flex; align-items: center; gap: 4px; font-size: .82em; cursor: pointer; }
+.thinking-toggle input { margin: 0; }
+
+/* Completion popup */
+.composer-input-wrapper { position: relative; flex: 1; }
+.completion-popup { position: absolute; bottom: 100%; left: 0; right: 0; background: #fff; border: 1px solid #d9dde3; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.1); max-height: 200px; overflow: auto; z-index: 100; }
+.completion-item { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 6px 10px; border: 0; border-radius: 0; background: #fff; color: #171717; text-align: left; font-size: .85em; cursor: pointer; }
+.completion-item:hover,
+.completion-item.selected { background: #eef2ff; }
+.completion-label { font-weight: 600; }
+.completion-desc { color: #737373; font-size: .78em; }

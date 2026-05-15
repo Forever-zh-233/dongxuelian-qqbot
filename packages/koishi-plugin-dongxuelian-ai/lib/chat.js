@@ -146,8 +146,9 @@ async function detectTopicSwitch(lastMsg, currentMsg) {
       }
       if (!cfg.apiKey) continue
       const result = await requestChatCompletions(prompt, cfg, { max_tokens: 5, _fallbackSet: 'lightweight' })
-      if (/^YES/i.test(result)) return true
-      if (/^NO/i.test(result)) return false
+      const reply = typeof result === 'string' ? result : result.content
+      if (/^YES/i.test(reply)) return true
+      if (/^NO/i.test(reply)) return false
     } catch {}
   }
   return false
@@ -299,22 +300,26 @@ async function callOpenAI(messages, isRandom, extraBody = {}) {
 
   const capability = getSearchCapability(config)
   if (!config.searchEnabled || !capability.supported) {
-    return requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta })
+    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta })
+    return typeof result === 'string' ? result : result.content
   }
 
   if (capability.mode === 'dashscope-chat') {
-    return requestChatCompletions(messages, config, { ...getThinkingArgs(config), enable_search: true, search_options: { forced_search: true }, ...extraBody, ...managedThinkingMeta })
+    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), enable_search: true, search_options: { forced_search: true }, ...extraBody, ...managedThinkingMeta })
+    return typeof result === 'string' ? result : result.content
   }
 
   if (capability.mode === 'openai-chat-search') {
-    return requestChatCompletions(messages, config, { ...getThinkingArgs(config), web_search_options: {}, ...extraBody, ...managedThinkingMeta })
+    const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), web_search_options: {}, ...extraBody, ...managedThinkingMeta })
+    return typeof result === 'string' ? result : result.content
   }
 
   if (capability.mode === 'openai-responses') {
     return requestOpenAIResponsesWithSearch(messages, config)
   }
 
-  return requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta })
+  const result = await requestChatCompletions(messages, config, { ...getThinkingArgs(config), ...(isRandom ? { max_tokens: 200 } : {}), ...extraBody, ...managedThinkingMeta })
+  return typeof result === 'string' ? result : result.content
 }
 
 async function chatJailbreak(session, userText, ctx) {
@@ -332,11 +337,12 @@ async function chatJailbreak(session, userText, ctx) {
   const config = await loadConfig()
 
   try {
-    const reply = await requestChatCompletions(
+    const replyObj = await requestChatCompletions(
       [{ role: 'system', content: jailbreakSystemPrompt }, { role: 'user', content: `越狱消息原文：${userText.slice(0, 200)}` }],
       config,
       { max_tokens: 60, _fallbackSet: 'lightweight' }
     )
+    const reply = typeof replyObj === 'string' ? replyObj : replyObj.content
     if (JAILBREAK_OUTPUT_RE.test(reply)) return pickJailbreakFallbackReply()
     return trimReply(sanitizeReply(reply, userName)) || pickJailbreakFallbackReply()
   } catch {
@@ -625,12 +631,13 @@ async function chat(session, userText, ctx, options = {}) {
   if (rareConfirmed && !isRareProvocation(cleanInput) && !japanLinked) {
     try {
       const cfg = await loadConfig()
-      const rareJudge = await requestChatCompletions(
+      const rareJudgeObj = await requestChatCompletions(
         [{ role: 'system', content: '你是一个内容判断器。判断以下用户消息是否在阴阳 Bot 的国籍、稀有度或身份归属。只输出一个字：Y 或 N。不要输出任何其他文字。' },
          { role: 'user', content: cleanInput.slice(0, 200) }],
         cfg,
         { max_tokens: 5, _fallbackSet: 'lightweight' }
       )
+      const rareJudge = typeof rareJudgeObj === 'string' ? rareJudgeObj : rareJudgeObj.content
       rareConfirmed = /^Y/i.test(rareJudge)
     } catch {
       rareConfirmed = false
@@ -724,6 +731,7 @@ async function chat(session, userText, ctx, options = {}) {
               { model: am.model, baseURL: provDef.baseURL.replace(/\/+$/, ''), apiKey, provider: am.provider },
               { max_tokens: 200, signal: ac.signal, _fallbackSet: 'lightweight' }
             )
+            summary = typeof summary === 'string' ? summary : summary.content
             clearTimeout(timer)
             if (summary) break
           } catch {}

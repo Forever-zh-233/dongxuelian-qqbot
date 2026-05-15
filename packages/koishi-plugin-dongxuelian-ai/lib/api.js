@@ -68,7 +68,6 @@ function buildManagedThinkingArgs(config = {}, enabled = false) {
   const model = String(config.model || '')
   if (!enabled) {
     if (isDashScopeConfig(config)) return { enable_thinking: false }
-    if (/glm|mimo|kimi/i.test(model)) return { thinking: { type: 'disabled' } }
     if (/deepseek/i.test(model)) return { enable_thinking: false }
     return {}
   }
@@ -135,7 +134,7 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
         body: JSON.stringify({
           model: config.model, temperature: 0.9, max_tokens: maxTokens,
-          ...(isDashScopeConfig(config) ? { enable_thinking: false } : {}),
+          ...buildManagedThinkingArgs(config, !!extraBody._thinkingEnabled),
           ...filteredExtraBody, messages: providerMessages,
           ...(tools && Array.isArray(tools) && tools.length ? { tools, tool_choice: 'auto' } : {}),
         }),
@@ -156,25 +155,26 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
 
     // tool_calls 必须在 content 判空之前检查
     if (tools && m.tool_calls && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      return { type: 'tool_calls', tool_calls: m.tool_calls, message: m }
+      return { type: 'tool_calls', tool_calls: m.tool_calls, message: m, reasoning: m.reasoning_content || '' }
     }
 
     let content = m.content && m.content.trim() ? m.content : ''
-    if (!content && m.reasoning_content) {
-      console.warn('[dongxuelian-ai] reasoning-only model response dropped')
+    const reasoning = m.reasoning_content || ''
+
+    if (!content && reasoning) {
       const fbStep = (config._fallbackTried || 0) + 1
       const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)
       if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig), tools)
+      return { type: 'text', content: '', reasoning }
     }
-    if (!content) throw new Error('Empty model response.')
-    if (/request was rejected|considered high risk/i.test(content)) {
+    if (!content) {
+      if (config._fallbackTried) return { type: 'text', content: '', reasoning }
       const fbStep = (config._fallbackTried || 0) + 1
       const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)
       if (fbConfig) return requestChatCompletions(messages, fbConfig, rebuildFallbackExtraBody(extraBody, fbConfig), tools)
-      content = ''
+      return { type: 'text', content: '', reasoning }
     }
-    if (!content) throw new Error('Empty model response.')
-    return String(content).replace(/\s+/g, ' ').trim()
+    return { type: 'text', content: String(content).replace(/\s+/g, ' ').trim(), reasoning }
   } catch (networkErr) {
     const isHttpError = String(networkErr?.message || '').includes('HTTP')
     const fbStep = (config._fallbackTried || 0) + 1

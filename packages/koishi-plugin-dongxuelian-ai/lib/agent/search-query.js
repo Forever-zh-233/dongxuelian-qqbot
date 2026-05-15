@@ -6,19 +6,21 @@
  */
 
 const TRUSTED_DOMAIN_RULES = [
-  { re: /(^|\.)kurogames\.com$/i, score: 90, label: '官方' },
-  { re: /(^|\.)wutheringwaves\.kurogames\.com$/i, score: 95, label: '官方' },
-  { re: /(^|\.)minecraft\.net$/i, score: 95, label: '官方' },
-  { re: /(^|\.)mojang\.com$/i, score: 90, label: '官方' },
+  { re: /(^|\.)9game\.cn$/i, score: 85, label: '资讯' },
+  { re: /(^|\.)17173\.com$/i, score: 80, label: '资讯' },
+  { re: /(^|\.)taptap\.cn$/i, score: 78, label: '平台' },
+  { re: /(^|\.)bilibili\.com$/i, score: 72, label: '平台' },
   { re: /(^|\.)biligame\.com$/i, score: 72, label: '平台' },
-  { re: /(^|\.)bilibili\.com$/i, score: 65, label: '平台' },
-  { re: /(^|\.)weibo\.com$/i, score: 62, label: '社媒' },
-  { re: /(^|\.)taptap\.cn$/i, score: 60, label: '平台' },
-  { re: /(^|\.)gamekee\.com$/i, score: 45, label: '社区资料' },
+  { re: /(^|\.)weibo\.com$/i, score: 68, label: '社媒' },
+  { re: /(^|\.)kurogames\.com$/i, score: 60, label: '官方' },
+  { re: /(^|\.)wutheringwaves\.kurogames\.com$/i, score: 55, label: '官方' },
+  { re: /(^|\.)minecraft\.net$/i, score: 90, label: '官方' },
+  { re: /(^|\.)mojang\.com$/i, score: 85, label: '官方' },
+  { re: /(^|\.)gamekee\.com$/i, score: 50, label: '社区资料' },
   { re: /(^|\.)fandom\.com$/i, score: 30, label: '社区资料' },
 ]
 
-const LOW_QUALITY_DOMAIN_RE = /(?:699pic|588ku|ibaotu|nipic|vcg|shutterstock|freepik|pngtree|58pic|lovepik|ooopic|素材|模板|壁纸|下载|图片|图库|站酷|千图|觅知|摄图|包图|昵图)/i
+const LOW_QUALITY_DOMAIN_RE = /(?:699pic|588ku|ibaotu|nipic|vcg|shutterstock|freepik|pngtree|58pic|lovepik|ooopic|素材|模板|壁纸|下载|图片|图库|站酷|千图|觅知|摄图|包图|昵图|推广|广告)/i
 const WUWA_RE = /(?:鸣潮|wuthering\s*waves|wutheringwaves|库洛|kuro)/i
 const MINECRAFT_RE = /(?:我的世界|minecraft|mojang)/i
 const LATEST_ROLE_RE = /(?:最新|新|当前|现在).{0,8}(?:角色|共鸣者|卡池)|(?:角色|共鸣者).{0,8}(?:最新|新|是谁)/i
@@ -51,14 +53,16 @@ function isMinecraftUpdateQuery(query = '') {
 function buildSearchQueries(rawQuery = '') {
   const query = cleanExplicitSearchQuery(rawQuery) || String(rawQuery || '').trim().slice(0, 180)
   const queries = []
+  const year = new Date().getFullYear()
   if (isWuwaLatestRoleQuery(query)) {
-    pushSearchQuery(queries, '鸣潮 最新角色 官方 公告 共鸣者')
-    pushSearchQuery(queries, '鸣潮 新角色 site:kurogames.com')
-    pushSearchQuery(queries, '鸣潮 新共鸣者 官方 微博 bilibili')
+    pushSearchQuery(queries, `鸣潮游戏 新角色 ${year}`)
+    pushSearchQuery(queries, '鸣潮 新共鸣者 上线 公告')
+    pushSearchQuery(queries, `Wuthering Waves new character ${year}`)
+    pushSearchQuery(queries, '鸣潮 最新版本 新角色')
   }
   if (isMinecraftUpdateQuery(query)) {
     pushSearchQuery(queries, 'Minecraft latest update official release notes')
-    pushSearchQuery(queries, 'Minecraft latest version site:minecraft.net article')
+    pushSearchQuery(queries, `Minecraft latest version ${year} official`)
     pushSearchQuery(queries, 'Minecraft Java Edition latest release official')
   }
   if (!isWuwaLatestRoleQuery(query) && !isMinecraftUpdateQuery(query) && GENERAL_LATEST_RE.test(query)) {
@@ -82,14 +86,19 @@ function getDirectSearchCandidates(query = '') {
   if (WUWA_RE.test(value)) {
     candidates.push(
       {
-        title: '鸣潮官网新闻公告',
-        url: 'https://wutheringwaves.kurogames.com/zh-cn/main/news',
-        snippet: '鸣潮官方新闻、公告、版本更新与共鸣者信息入口。',
+        title: '鸣潮攻略资讯 - 九游',
+        url: 'https://www.9game.cn/mingchao/',
+        snippet: '鸣潮最新攻略、新角色、版本更新资讯。',
       },
       {
-        title: 'Wuthering Waves Official News',
-        url: 'https://wutheringwaves.kurogames.com/en/main/news',
-        snippet: 'Official Wuthering Waves news and update announcements.',
+        title: '鸣潮新闻 - TapTap',
+        url: 'https://www.taptap.cn/app/228783/topic',
+        snippet: '鸣潮社区讨论、新角色爆料、版本前瞻。',
+      },
+      {
+        title: '鸣潮官方新闻公告',
+        url: 'https://wutheringwaves.kurogames.com/zh-Hans/main/news',
+        snippet: '鸣潮官方新闻公告页面。',
       }
     )
   }

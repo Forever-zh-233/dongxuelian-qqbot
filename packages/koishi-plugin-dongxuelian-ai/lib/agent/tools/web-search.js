@@ -139,7 +139,7 @@ module.exports = {
     }
 
     try {
-      const result = await searchWithTimeout(
+      const resultObj = await searchWithTimeout(
         requestChatCompletions(
           [{ role: 'user', content: `搜索当前最新信息，不要凭训练数据编造。优先官方或高可信来源，忽略素材/模板/图片下载站。查询：${queries.join('；')}` }],
           config,
@@ -148,6 +148,7 @@ module.exports = {
         API_SEARCH_TIMEOUT_MS,
         'API 搜索',
       )
+      const result = typeof resultObj === 'string' ? resultObj : resultObj.content
       if (typeof result === 'string' && /超时/.test(result)) return fallbackSearch(queries, `${result}。`)
       if (result && typeof result === 'string' && !apiSearchLooksUnreliable(result)) return result
       return fallbackSearch(queries, 'API 搜索没有返回可靠来源。')

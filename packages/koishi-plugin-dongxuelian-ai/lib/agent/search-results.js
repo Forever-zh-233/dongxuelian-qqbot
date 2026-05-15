@@ -4,11 +4,17 @@
  * 边界: 不启动浏览器、不调用 AI API、不读写文件。
  * 状态: 无。
  */
-const { sortSearchResults, isLowQualitySearchResult } = require('./search-query')
+const { sortSearchResults, isLowQualitySearchResult, getSearchHostname } = require('./search-query')
 
 const SEARCH_NAV_TITLE_RE = /^(全部|搜索|图片|视频|地图|资讯|新闻|网页|更多|工具|时间不限|Any time|Tools|WEB|IMAGES|VIDEOS|MAPS|贴吧|知道|文库)$/i
 const SEARCH_NOISE_RE = /(?:某些结果已被删除|Skip to content|Accessibility Feedback|辅助功能反馈|跳至内容|百度热搜|相关搜索|大家还在搜|广告|推广|免责声明)/
 const SEARCH_INTERNAL_URL_RE = /(?:javascript:|\/search\?|\/images\/search|\/videos\/search|go\.microsoft\.com\/fwlink|baidu\.com\/s\?|bing\.com\/search\?|duckduckgo\.com\/html\/?)/i
+const DICTIONARY_RESULT_RE = /(?:字典|百科|汉典|汉语|词典|说文|康熙|释义|笔画|部首|拼音|字义|字源|字汇)/i
+const HOMEPAGE_RESULT_RE = /(?:首页|官网首页|主页|home\s*page|index|portal|welcome)/i
+const MIN_SEARCH_RESULT_SCORE = 5
+
+const TRUSTED_DOMAIN_FOR_PASS_RE = /(?:kurogames|wutheringwaves|minecraft|mojang|bilibili|weibo|taptap|gamekee|17173|9game|\.gov|\.edu|github|developer|docs|official|news|support|changelog|release)/i
+const HIGH_VALUE_ENTITY_RE = /(?:[一-鿿]{2,6}(?:版本|公告|更新|角色|共鸣者|卡池|活动|前瞻|直播))|(?:v?\d+\.\d+(?:\.\d+)?)|(?:[A-Z][a-z]+(?:[A-Z][a-z]+)+)|(?:(?:release|version|update|patch|snapshot|pre-release)\s*[\d.]+)/gi
 
 function normalizeResultUrl(url = '') {
   const raw = String(url || '').trim()
@@ -63,7 +69,11 @@ function hasQuerySignal(item = {}, query = '') {
   const terms = getQueryTerms(query)
   if (!terms.length) return true
   const haystack = `${item.title || ''}\n${item.snippet || ''}\n${item.text || ''}\n${item.url || ''}`.toLowerCase()
-  return terms.some(term => haystack.includes(term.toLowerCase())) || hasTrustedSearchSignal(item, query)
+  if (terms.some(term => haystack.includes(term.toLowerCase()))) return true
+  if (hasTrustedSearchSignal(item, query)) return true
+  const host = getSearchHostname(item.url)
+  if (TRUSTED_DOMAIN_FOR_PASS_RE.test(host) && getResultDomainSignal(item)) return true
+  return false
 }
 
 function getResultDomainSignal(item = {}) {
@@ -96,6 +106,8 @@ function isUsefulSearchResult(item = {}, query = '') {
   if (SEARCH_INTERNAL_URL_RE.test(normalized.url)) return false
   if (!/^https?:\/\//i.test(normalized.url)) return false
   if (isLowQualitySearchResult(normalized)) return false
+  if (DICTIONARY_RESULT_RE.test(normalized.title)) return false
+  if (DICTIONARY_RESULT_RE.test(normalized.url)) return false
   return hasQuerySignal(normalized, query) || getResultDomainSignal(normalized)
 }
 
@@ -110,7 +122,9 @@ function rankSearchCandidates(candidates = [], query = '', limit = 8) {
     seen.add(key)
     useful.push(item)
   }
-  return sortSearchResults(useful, query).slice(0, limit)
+  return sortSearchResults(useful, query)
+    .filter(item => (item.score || 0) >= MIN_SEARCH_RESULT_SCORE)
+    .slice(0, limit)
 }
 
 function formatSearchResults(query = '', results = []) {
@@ -128,6 +142,83 @@ function buildSearchFailureText(query = '', failures = []) {
   return `已搜索：${query}\n未提取到有效搜索结果。搜索页结果抽取失败或结果质量过低，已拒绝把广告、导航、侧栏正文当作搜索事实。${detail}`
 }
 
+function classifySearchResult(ranked = [], pages = []) {
+  if (!ranked.length) return 'hard_fail'
+  const hasPageContent = pages.some(p => p.text && p.text.length >= 80)
+  const hasHighScore = ranked.some(r => (r.score || 0) >= 50)
+  const hasVeryHighScore = ranked.some(r => (r.score || 0) >= 80)
+  if (hasPageContent && hasHighScore) return 'usable_hit'
+  if (hasVeryHighScore && pages.some(p => p.text && p.text.length >= 40)) return 'usable_hit'
+  if (ranked.length > 0) return 'weak_hit'
+  return 'hard_fail'
+}
+
+function extractRetryKeywords(ranked = [], pages = [], originalQuery = '') {
+  const seen = new Set(getQueryTerms(originalQuery).map(t => t.toLowerCase()))
+  const candidates = []
+  const allText = [
+    ...ranked.map(r => `${r.title || ''} ${r.snippet || ''}`),
+    ...pages.map(p => p.text || ''),
+  ].join(' ')
+  const entityMatches = allText.match(HIGH_VALUE_ENTITY_RE) || []
+  for (const m of entityMatches) {
+    const word = m.trim()
+    if (word.length < 2 || word.length > 30) continue
+    const key = word.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    candidates.push(word)
+    if (candidates.length >= 6) break
+  }
+  return candidates.slice(0, 4)
+}
+
+function detectFailurePattern(ranked = [], pages = [], allCandidates = []) {
+  if (!ranked.length && !allCandidates.length) return 'no_results'
+  const items = [...ranked, ...allCandidates]
+  const total = items.length
+  let dictCount = 0
+  let homeCount = 0
+  for (const item of items) {
+    const text = `${item.title || ''} ${item.snippet || ''}`
+    if (DICTIONARY_RESULT_RE.test(text)) dictCount++
+    if (HOMEPAGE_RESULT_RE.test(text)) homeCount++
+  }
+  if (dictCount >= total * 0.4) return 'dictionary_ambiguity'
+  if (homeCount >= total * 0.3) return 'homepage_only'
+  if (ranked.length && pages.every(p => !p.text || p.text.length < 80)) return 'shallow_content'
+  if (ranked.length) return 'low_relevance'
+  return 'no_results'
+}
+
+function buildStrategyQueries(failurePattern, originalQuery, usedQueries) {
+  const result = []
+  const year = new Date().getFullYear()
+  const push = (q) => {
+    const trimmed = q.trim().slice(0, 180)
+    if (trimmed && !usedQueries.has(trimmed.toLowerCase())) result.push(trimmed)
+  }
+  if (failurePattern === 'dictionary_ambiguity') {
+    push(`${originalQuery} 游戏 新闻`)
+    push(`${originalQuery} 游戏 最新 ${year}`)
+    const enMatch = originalQuery.match(/鸣潮/i) ? 'Wuthering Waves' : originalQuery.match(/我的世界/i) ? 'Minecraft' : ''
+    if (enMatch) push(`${enMatch} latest news ${year}`)
+  } else if (failurePattern === 'homepage_only') {
+    push(`${originalQuery} 公告 新闻 ${year}`)
+    push(`${originalQuery} 最新 更新 版本`)
+  } else if (failurePattern === 'shallow_content') {
+    push(`${originalQuery} 详情 攻略`)
+    push(`${originalQuery} 公告 详细`)
+  } else if (failurePattern === 'low_relevance') {
+    push(`${originalQuery} 官方 ${year}`)
+    push(`"${originalQuery}" 最新`)
+  } else {
+    push(`${originalQuery} ${year}`)
+    push(`${originalQuery} 最新消息`)
+  }
+  return result.slice(0, 3)
+}
+
 module.exports = {
   normalizeResultUrl,
   normalizeSearchCandidate,
@@ -137,4 +228,8 @@ module.exports = {
   rankSearchCandidates,
   formatSearchResults,
   buildSearchFailureText,
+  classifySearchResult,
+  extractRetryKeywords,
+  detectFailurePattern,
+  buildStrategyQueries,
 }
