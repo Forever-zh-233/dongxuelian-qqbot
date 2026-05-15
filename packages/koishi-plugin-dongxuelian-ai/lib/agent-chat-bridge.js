@@ -71,16 +71,16 @@ function summarizeAgentToolResults(toolResults = []) {
 
 function recordAgentChatResult({ session, userMessage = '', userName = '用户', userId = '', channelKey = '', agentResult = {} } = {}) {
   const reply = normalizeText(agentResult && agentResult.reply || '')
-  if (!session || !reply || /^\(Agent 未获取到有效回复\)/.test(reply)) return null
+  if (!reply || /^\(Agent 未获取到有效回复\)/.test(reply)) return null
   if (agentResult && agentResult.pendingId) return null
 
   const safeUserName = sanitizeUserName(userName || '用户')
   const cleanUserMessage = normalizeText(userMessage).slice(0, 1200)
-  const normalizedChannelKey = channelKey || getChannelKey(session)
-  const normalizedUserId = String(userId || session.userId || session.author?.id || session.username || 'unknown')
+  const normalizedChannelKey = channelKey || (session ? getChannelKey(session) : 'dashboard')
+  const normalizedUserId = String(userId || (session ? (session.userId || session.author?.id || session.username) : 'dashboard') || 'unknown')
   const toolSummary = summarizeAgentToolResults(agentResult.toolResults || [])
 
-  if (cleanUserMessage) {
+  if (session && cleanUserMessage) {
     saveConversationTurn(
       session,
       `<user>\n昵称：${safeUserName}\n发言：${cleanUserMessage}\n</user>`,
@@ -110,7 +110,7 @@ function getRecentAgentContextNote({ channelKey = '', userId = '', userMessage =
   const entry = recentAgentContextCache.get(buildAgentContextKey(channelKey, userId))
   if (!entry) return ''
   if (Date.now() - Number(entry.ts || 0) > RECENT_AGENT_CONTEXT_TTL_MS) return ''
-  if (!isAgentFollowUp(userMessage)) return ''
+  
   const lines = [
     '[最近 Agent 工具上下文-内部参考]',
     '用户正在追问你刚才的 Agent/搜索/工具结果。你可以承认刚才调用过工具，并只根据下面摘要回答；不要说自己没搜索。',

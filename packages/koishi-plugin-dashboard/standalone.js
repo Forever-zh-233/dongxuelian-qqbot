@@ -3805,6 +3805,16 @@ const server = http.createServer(async (req, res) => {
             ...searchRunOptions,
           }),
         })
+        if (result && result.reply && !(result.pendingId)) {
+          require(path.join(AI_LIB, 'agent', 'agent-chat-bridge')).recordAgentChatResult({
+            session: null,
+            userMessage: message,
+            userName: String(data.userName || 'Dashboard'),
+            userId: String(data.userId || 'dashboard'),
+            channelKey: 'dashboard',
+            agentResult: result,
+          })
+        }
         return json(res, { ok: true, ...result })
       } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
     })
