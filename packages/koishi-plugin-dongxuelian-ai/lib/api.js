@@ -19,6 +19,37 @@ function parseApiPositiveInt(value, fallback, min, max) {
   return Math.max(min, Math.min(max, parsed))
 }
 
+const TOKEN_USAGE_FILE = path.join(DATA_DIR, 'token-usage.json')
+let _tokenUsageCache = null
+let _tokenUsageFlushTimer = null
+
+function recordTokenUsage(provider, tokens) {
+  if (!provider || !tokens || tokens <= 0) return
+  const date = new Date().toISOString().slice(0, 10)
+  if (!_tokenUsageCache) {
+    try {
+      const raw = fs.readFileSync(TOKEN_USAGE_FILE, 'utf8')
+      _tokenUsageCache = JSON.parse(raw)
+    } catch { _tokenUsageCache = {} }
+  }
+  if (!_tokenUsageCache[date]) _tokenUsageCache[date] = {}
+  _tokenUsageCache[date][provider] = (_tokenUsageCache[date][provider] || 0) + tokens
+  if (!_tokenUsageFlushTimer) {
+    _tokenUsageFlushTimer = setTimeout(() => {
+      _tokenUsageFlushTimer = null
+      try { fs.writeFileSync(TOKEN_USAGE_FILE, JSON.stringify(_tokenUsageCache, null, 2)) } catch {}
+    }, 5000)
+  }
+}
+
+function flushTokenUsage() {
+  if (_tokenUsageCache && _tokenUsageFlushTimer) {
+    clearTimeout(_tokenUsageFlushTimer)
+    _tokenUsageFlushTimer = null
+    try { fs.writeFileSync(TOKEN_USAGE_FILE, JSON.stringify(_tokenUsageCache, null, 2)) } catch {}
+  }
+}
+
 function mimeFromImagePath(filePath = '') {
   const ext = String(filePath || '').split('.').pop().toLowerCase()
   return { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' }[ext] || 'image/jpeg'
@@ -151,6 +182,8 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
       throw new Error((isFallback ? '[FALLBACK] ' : '') + `HTTP ${response.status} ${text}`.trim())
     }
     const data = await response.json()
+    const usageTokens = data?.usage?.total_tokens || 0
+    if (usageTokens > 0) recordTokenUsage(config.provider || 'unknown', usageTokens)
     const m = data?.choices?.[0]?.message || {}
 
     // tool_calls 必须在 content 判空之前检查
@@ -205,6 +238,8 @@ async function requestOpenAIResponsesWithSearch(messages, config) {
     })
     if (!response.ok) { const text = await response.text().catch(() => ''); throw new Error(`HTTP ${response.status} ${text}`.trim()) }
     const data = await response.json()
+    const usageTokens = data?.usage?.total_tokens || 0
+    if (usageTokens > 0) recordTokenUsage(config.provider || 'unknown', usageTokens)
     return extractResponsesText(data)
   } finally { clearTimeout(timer) }
 }
@@ -485,5 +520,5 @@ module.exports = {
   buildFallbackConfig, getFallbackSteps,
   callGetImage, callGetForwardMsg, sendForwardMsg, getGroupMemberInfo, getGroupInfo,
   readImageAsBase64, extractImageFileFromElements, downloadImageAsBase64,
-  isVisionModel,
+  isVisionModel, recordTokenUsage, flushTokenUsage,
 }

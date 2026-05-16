@@ -128,7 +128,7 @@ async function run(t) {
     }
   } catch {}
 
-  await runChatCase(t, 'QQ Agent runs in direct mode and chat retells with persona', [
+  await runChatCase(t, 'QQ Agent runs in direct mode and chat retells with minimal prompt', [
     { json: { choices: [{ message: { content: 'agent-direct-raw' } }] } },
     { json: { choices: [{ message: { content: 'agent-persona-retold' } }] } },
   ], async (result, mocked, session, calls) => {
@@ -137,7 +137,7 @@ async function run(t) {
     t.check('scenario QQ Agent prompt includes direct mode marker', agentPrompt.includes('Agent 直连模式'), agentPrompt)
     const chatPrompt = JSON.stringify(calls[1]?.requestBody?.messages || [])
     t.check('scenario QQ Agent chat call includes agent context', chatPrompt.includes('工具查到的信息'), chatPrompt)
-    t.check('scenario QQ Agent chat call includes core persona', chatPrompt.includes('AGENT_CORE_MARKER'), chatPrompt)
+    t.check('scenario QQ Agent chat call includes core persona', chatPrompt.includes('简短转述'), chatPrompt)
   }, {
     input: '搜一下现在最新的天气是什么',
     async setup(session, { data }) {

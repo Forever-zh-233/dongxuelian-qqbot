@@ -9,6 +9,7 @@ const path = require('path')
 const { DATA_DIR } = require('../constants')
 
 const MEMORY_DIR = path.join(DATA_DIR, 'agent-memory')
+const DASHBOARD_MEMORY_DIR = path.join(DATA_DIR, 'agent-memory-dashboard')
 const MAX_MEMORY_FILE_BYTES = 512 * 1024
 
 function safeUserId(userId = '') {
@@ -121,10 +122,34 @@ function formatMemoryItems(items = []) {
   }).join('\n')
 }
 
+async function searchDashboardMemory({ userId, query = '' } = {}) {
+  const longTermFile = path.join(DASHBOARD_MEMORY_DIR, safeUserId(userId) + '.md')
+  try {
+    const stat = await fsp.stat(longTermFile)
+    if (!stat.isFile() || stat.size > MAX_MEMORY_FILE_BYTES) return ''
+    const content = await fsp.readFile(longTermFile, 'utf8')
+    if (!content.trim()) return ''
+    if (!query.trim()) return content.trim().slice(0, 2000)
+    const tokens = tokenize(query)
+    if (!tokens.length) return content.trim().slice(0, 2000)
+    const lines = content.split('\n').filter(l => l.trim())
+    const matched = lines.filter(line => {
+      const lower = line.toLowerCase()
+      return tokens.some(t => lower.includes(t.toLowerCase()))
+    })
+    if (matched.length) return matched.join('\n').slice(0, 2000)
+    return content.trim().slice(0, 2000)
+  } catch {
+    return ''
+  }
+}
+
 module.exports = {
   MEMORY_DIR,
+  DASHBOARD_MEMORY_DIR,
   remember,
   searchMemory,
+  searchDashboardMemory,
   forgetMemory,
   listMemory,
   formatMemoryItems,

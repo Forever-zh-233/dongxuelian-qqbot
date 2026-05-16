@@ -27,9 +27,18 @@
 
   <div class="card token-usage-card">
     <h2>Token 用量</h2>
-    <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-sm" @click="loadUsage" :disabled="loadingUsage">{{ loadingUsage ? '加载中...' : '刷新' }}</button>
       <span v-if="usageDays.length" style="font-size:12px;color:var(--text3)">最近 {{ usageDays.length }} 天</span>
+      <span v-if="usageTotal > 0" style="font-size:12px;color:var(--text2);margin-left:auto">
+        合计 <strong>{{ formatTokens(usageTotal) }}</strong>
+      </span>
+    </div>
+    <div v-if="usageProviders.length" class="token-legend">
+      <span v-for="p in usageProviders" :key="p.key" class="token-legend-item">
+        <span class="token-legend-dot" :style="{ background: p.color }"></span>
+        {{ p.label }}
+      </span>
     </div>
     <div v-if="usageDays.length" class="token-bars">
       <div class="token-bar-row" v-for="day in usageDays" :key="day.date">
@@ -37,12 +46,13 @@
         <div class="token-bars-stack">
           <div v-for="p in usageProviders" :key="p.key" class="token-bar-seg"
             :style="{ width: ((day[p.key] || 0) / usageMax * 100) + '%', background: p.color }"
-            :title="p.label + ': ' + (day[p.key] || 0)">
+            :title="p.label + ': ' + formatTokens(day[p.key] || 0)">
           </div>
         </div>
+        <span class="token-count">{{ formatTokens(dayTotal(day)) }}</span>
       </div>
     </div>
-    <div v-else style="color:var(--text3);font-size:13px">暂无用量数据</div>
+    <div v-else style="color:var(--text3);font-size:13px">暂无用量数据（API 调用后自动记录）</div>
   </div>
 </template>
 
@@ -53,6 +63,12 @@ import { fetchKeys, updateKey, fetchKeysUsage } from '../api'
 const providerColors = {
   opencode: '#f4c430', dashscope: '#38bdf8', deepseek: '#a78bfa',
   glm: '#34d399', mimorium: '#f472b6'
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+  return String(n)
 }
 
 export default {
@@ -67,6 +83,7 @@ export default {
     const usageDays = ref([])
     const usageProviders = ref([])
     const usageMax = ref(1)
+    const usageTotal = ref(0)
     const loadingUsage = ref(false)
 
     onMounted(async () => {
@@ -109,26 +126,41 @@ export default {
           return { key: p, label: p, color: providerColors[p] || '#888' }
         })
         let max = 1
+        let total = 0
         for (const d of usageDays.value) {
+          let daySum = 0
           for (const p of usageProviders.value) {
-            if (d[p.key] > max) max = d[p.key]
+            daySum += (d[p.key] || 0)
           }
+          if (daySum > max) max = daySum
+          total += daySum
         }
         usageMax.value = max
+        usageTotal.value = total
       }
       loadingUsage.value = false
     }
 
-    return { keys, editing, editValue, saving, keyMsg, editKey, saveKey, usageDays, usageProviders, usageMax, loadingUsage, loadUsage }
+    function dayTotal(day) {
+      let sum = 0
+      for (const p of usageProviders.value) sum += (day[p.key] || 0)
+      return sum
+    }
+
+    return { keys, editing, editValue, saving, keyMsg, editKey, saveKey, usageDays, usageProviders, usageMax, usageTotal, loadingUsage, loadUsage, formatTokens, dayTotal }
   }
 }
 </script>
 
 <style scoped>
 .token-usage-card { margin-top: 16px }
-.token-bars { display:flex; flex-direction:column; gap:6px }
-.token-bar-row { display:flex; align-items:center; gap:4px }
-.token-date { width:36px; font-size:11px; color:var(--text3); text-align:right; flex-shrink:0 }
-.token-bars-stack { flex:1; height:14px; border-radius:3px; background:var(--input); overflow:hidden; display:flex }
+.token-legend { display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap }
+.token-legend-item { display:flex; align-items:center; gap:4px; font-size:12px; color:var(--text2) }
+.token-legend-dot { width:10px; height:10px; border-radius:2px; flex-shrink:0 }
+.token-bars { display:flex; flex-direction:column; gap:8px }
+.token-bar-row { display:flex; align-items:center; gap:8px }
+.token-date { width:40px; font-size:12px; color:var(--text3); text-align:right; flex-shrink:0; font-family:monospace }
+.token-bars-stack { flex:1; height:22px; border-radius:4px; background:var(--input); overflow:hidden; display:flex }
 .token-bar-seg { height:100%; min-width:2px; transition: width .3s ease }
+.token-count { width:48px; font-size:11px; color:var(--text3); text-align:right; flex-shrink:0; font-family:monospace }
 </style>

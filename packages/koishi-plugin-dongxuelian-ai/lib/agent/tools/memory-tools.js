@@ -44,11 +44,17 @@ const searchMemoryTool = {
     },
   },
   async execute(params = {}, context = {}) {
+    const channel = context.channel || 'qq'
+    if (channel === 'dashboard') {
+      const dashResult = await memory.searchDashboardMemory({ userId: getUserId(context), query: params.query })
+      if (dashResult) return dashResult
+      return '没有找到相关记忆。'
+    }
     const items = await memory.searchMemory({ userId: getUserId(context), channelKey: context.channelKey, query: params.query, limit: params.limit })
     return memory.formatMemoryItems(items)
   },
   dangerous: false,
-  defaultChannels: ['dashboard', 'qq'],
+  defaultChannels: ['dashboard'],
 }
 
 const forgetMemoryTool = {

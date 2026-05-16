@@ -14,6 +14,7 @@ const personaPrompt = require('./persona-prompt.test')
 const sendGuard = require('./send-guard.test')
 const agentPhase3 = require('./agent-phase3.test')
 const e2eSimulation = require('./e2e-simulation.test')
+const autoMemory = require('./auto-memory.test')
 
 const SCENARIOS = [
   command,
@@ -32,6 +33,7 @@ const SCENARIOS = [
   sendGuard,
   agentPhase3,
   e2eSimulation,
+  autoMemory,
 ]
 
 async function runScenarioTests(t) {

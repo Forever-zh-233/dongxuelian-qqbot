@@ -18,6 +18,7 @@ const { buildAgentPersonaContext, mergeAgentSystemExtra } = require('./persona-c
 const { buildAgentWorkspaceContext } = require('./workspace-context')
 const { getAgentPathAllowedRoots } = require('./path-guard')
 const { recordAgentSession } = require('./sessions')
+const { onAgentReplyComplete } = require('./auto-memory')
 const { MAX_TOOL_ROUNDS } = require('../constants')
 
 const MAX_ROUNDS = MAX_TOOL_ROUNDS
@@ -237,7 +238,9 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
     toolResults.push({ name: call.function.name, result: String(outcome.result || '').slice(0, 8000) })
     messages.push({ role: 'tool', tool_call_id: call.id, content: externalizeToolResult(outcome.result, call.function.name) })
   }
-  return continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolResults, onProgress, bot, enableThinking })
+  const agentResult = await continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolResults, onProgress, bot, enableThinking })
+  onAgentReplyComplete({ userId, channel, messages }).catch(() => {})
+  return agentResult
 }
 
 async function resumePending({ channelKey, userId, channel = 'qq', expectedId = '', onProgress, bot }) {

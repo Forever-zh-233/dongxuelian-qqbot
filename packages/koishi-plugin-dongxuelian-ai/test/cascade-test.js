@@ -514,6 +514,8 @@ async function main() {
     agentHttpSearch: path.join(LIB, 'agent', 'http-search'),
     agentQueue: path.join(LIB, 'agent', 'queue'),
     agentMemory: path.join(LIB, 'agent', 'memory'),
+    agentAutoMemory: path.join(LIB, 'agent', 'auto-memory'),
+    agentDream: path.join(LIB, 'agent', 'dream'),
     agentPush: path.join(LIB, 'agent', 'push'),
     agentCron: path.join(LIB, 'agent', 'cron'),
     agentPlanStore: path.join(LIB, 'agent', 'plan', 'plan-store'),
