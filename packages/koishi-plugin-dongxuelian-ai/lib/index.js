@@ -1092,7 +1092,7 @@ exports.apply = (ctx) => {
           channelPendingRandom.delete(channelKey)
           if (p && shouldTriggerRandom(Math.min(getRandomTriggerRate(channelKey) * willFactor, 1.0))) {
             channelMissCount.set(channelKey, 0)
-            enqueueForChannel(channelKey, () => chat(session, p.combinedText, ctx, { randomTriggered: true, sharedContextNote: p.sharedContextNote, quotedMessageNote: p.quotedMessageNote, forwardSummaryText: p.forwardSummaryText, replyToId: p.replyToId }).then(chatResult => { const reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText: p.combinedText, randomTriggered: true }); if (reply) safeSendReply(ctx, session, reply, true) }), 4)
+            enqueueForChannel(channelKey, () => chat(session, p.combinedText, ctx, { randomTriggered: true, sharedContextNote: p.sharedContextNote, quotedMessageNote: p.quotedMessageNote, forwardSummaryText: p.forwardSummaryText, replyToId: p.replyToId }).then(chatResult => { let reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText: p.combinedText, randomTriggered: true }); if (reply) { reply = reply.replace(/【语音风格[：:][^】]+】/g, '').trim() || reply; safeSendReply(ctx, session, reply, true) } }), 4)
           } else {
             channelMissCount.set(channelKey, (channelMissCount.get(channelKey) || 0) + 1)
           }
@@ -1212,19 +1212,21 @@ exports.apply = (ctx) => {
         const reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText, randomTriggered })
         if (!reply) return
         if (randomTriggered && inGuild) {
-          const { shouldTriggerRandomVoice, markChannelCooldown, synthesizeSpeech, sendVoiceMessage, resolvePersonaVoice, extractVoiceStyle, stripVoiceStyleTag } = require('./tts')
-          if (shouldTriggerRandomVoice(channelKey)) {
-            const resolved = resolvePersona(channelKey, currentUserId)
-            const voiceOpts = resolvePersonaVoice(resolved.name)
-            const styleOverride = extractVoiceStyle(reply)
-            if (styleOverride) voiceOpts.style = styleOverride
-            const ttsText = stripVoiceStyleTag(reply)
-            const buf = await synthesizeSpeech(ttsText, voiceOpts)
-            if (buf) {
-              const sent = await sendVoiceMessage(session, buf)
-              if (sent) { markChannelCooldown(channelKey); return }
+          try {
+            const { shouldTriggerRandomVoice, markChannelCooldown, synthesizeSpeech, sendVoiceMessage, resolvePersonaVoice, extractVoiceStyle, stripVoiceStyleTag } = require('./tts')
+            if (shouldTriggerRandomVoice(channelKey)) {
+              const resolved = resolvePersona(channelKey, currentUserId)
+              const voiceOpts = resolvePersonaVoice(resolved.name)
+              const styleOverride = extractVoiceStyle(reply)
+              if (styleOverride) voiceOpts.style = styleOverride
+              const ttsText = stripVoiceStyleTag(reply)
+              const buf = await synthesizeSpeech(ttsText, voiceOpts)
+              if (buf) {
+                const sent = await sendVoiceMessage(session, buf)
+                if (sent) { markChannelCooldown(channelKey); return }
+              }
             }
-          }
+          } catch {}
         }
         if (inGuild && /别问了，这个我不聊/.test(reply)) {
           notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})

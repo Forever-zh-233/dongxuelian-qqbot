@@ -627,7 +627,12 @@ async function handleCommand(session, ctx, state) {
   }
 
   if (/^朗读$/.test(plain) && session.quote?.content) {
-    const quoteText = sanitizeUserInput(session.quote.content).slice(0, 300)
+    const rawQuote = String(session.quote.content || '')
+      .replace(/\[CQ:[^\]]+\]/gi, '')
+      .replace(/<[^>]+\/?>/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const quoteText = sanitizeUserInput(rawQuote).slice(0, 300)
     if (!quoteText) return handled('引用的消息没有可朗读的文本。')
     const { synthesizeSpeech, sendVoiceMessage, resolvePersonaVoice } = require('./tts')
     const resolved = resolvePersona(channelKey, currentUserId)

@@ -1,12 +1,10 @@
 /**
  * MODULE: 语音合成（TTS）。
- * 职责: 调 MiMo TTS API 合成语音 → 写临时 WAV → 发送 QQ record 消息段。
+ * 职责: 调 MiMo TTS API 合成语音 → 发送 QQ record 消息段。
  * 边界: 不写对话历史、不改 conversation。只负责合成和发送。
  * 状态: 频道冷却 Map（内存，5 分钟过期）。
  */
-const fs = require('fs')
-const path = require('path')
-const { TTS_TEMP_DIR, MIMORIUM_KEY_FILE, DATA_DIR } = require('./constants')
+const { MIMORIUM_KEY_FILE } = require('./constants')
 const { readTextFile } = require('./utils')
 const { parsePersonaFrontmatter, loadPersonalSkill } = require('./persona')
 
@@ -70,19 +68,13 @@ async function synthesizeSpeech(text, options = {}) {
 }
 async function sendVoiceMessage(session, audioBuf) {
   if (!audioBuf || !audioBuf.length) return false
-  fs.mkdirSync(TTS_TEMP_DIR, { recursive: true })
-  const filename = `tts-${Date.now()}-${Math.random().toString(16).slice(2, 8)}.wav`
-  const filePath = path.join(TTS_TEMP_DIR, filename)
   try {
-    fs.writeFileSync(filePath, audioBuf)
     const { h } = require('koishi')
     const base64 = audioBuf.toString('base64')
     await session.send(h.audio(`data:audio/wav;base64,${base64}`))
     return true
   } catch {
     return false
-  } finally {
-    setTimeout(() => { try { fs.unlinkSync(filePath) } catch {} }, 10000)
   }
 }
 
@@ -104,7 +96,7 @@ function extractVoiceStyle(replyText) {
 }
 
 function stripVoiceStyleTag(text) {
-  return String(text || '').replace(VOICE_STYLE_RE, '').trim()
+  return String(text || '').replace(/【语音风格[：:][^】]+】/g, '').trim()
 }
 
 function getBuiltinVoices() {
