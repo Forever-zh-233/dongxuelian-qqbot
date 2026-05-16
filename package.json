@@ -32,7 +32,8 @@
     "koishi-plugin-local-video-sender": "file:packages/koishi-plugin-local-video-sender",
     "koishi-plugin-pet-bridge": "file:packages/koishi-plugin-pet-bridge",
     "puppeteer-core": "^24.42.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "silk-wasm": "^3.7.1"
   },
   "overrides": {
     "@satorijs/core": "3.7.0"

@@ -16,6 +16,7 @@ const agentPhase3 = require('./agent-phase3.test')
 const e2eSimulation = require('./e2e-simulation.test')
 const autoMemory = require('./auto-memory.test')
 const skillMarket = require('./skill-market.test')
+const voiceTts = require('./voice-tts.test')
 
 const SCENARIOS = [
   command,
@@ -36,6 +37,7 @@ const SCENARIOS = [
   e2eSimulation,
   autoMemory,
   skillMarket,
+  voiceTts,
 ]
 
 async function runScenarioTests(t) {

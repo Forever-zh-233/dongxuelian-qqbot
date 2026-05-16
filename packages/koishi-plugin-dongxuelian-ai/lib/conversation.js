@@ -465,7 +465,7 @@ function getQuoteContentText(session) {
       if (s.type === 'at') return '@' + (s.data && (s.data.name || s.data.qq || s.data.id || ''))
       if (s.type === 'forward') return '[转发消息]'
       if (s.type === 'video') return '[视频]'
-      if (s.type === 'record') return '[语音]'
+      if (s.type === 'record') return (s.data && s.data._transcribedText) ? `[语音转文字：${s.data._transcribedText}]` : '[语音]'
       if (s.type === 'file') return '[文件]'
       return '[消息]'
     }).filter(Boolean).join('')

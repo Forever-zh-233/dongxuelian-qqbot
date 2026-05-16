@@ -31,6 +31,7 @@ const { resolveForwardSummary } = require('./forward')
 const { prepareVisionRequest, isVisionSession } = require('./vision')
 const { storeImageUrl, cacheImageFile } = require('./image-store')
 const { enqueueAnalysis } = require('./image-analyzer')
+const { transcribeVoice } = require('./voice')
 const {
   classifySendError,
   sanitizeForRateLimit,
@@ -747,7 +748,7 @@ exports.apply = (ctx) => {
       }
     }
 
-    if (!plain && !directAt && !session.isDirect && !analyzed.hasVisual) return next()
+    if (!plain && !directAt && !session.isDirect && !analyzed.hasVisual && !analyzed.hasAudio) return next()
 
     logDebug(ctx, 'middleware', `entry userId=${session.userId} isDirect=${!!session.isDirect} guildId=${session.guildId} type=${session.type} subtype=${session.subtype} contentLen=${(session.content || '').length}`)
     logDebug(ctx, 'middleware', `plain=${JSON.stringify(plain).slice(0, 100)} directAt=${directAt} isDirect=${!!session.isDirect}`)
@@ -771,6 +772,24 @@ exports.apply = (ctx) => {
       }
       if (!plain.includes('[图片]')) plain = (plain ? plain + ' ' : '') + '[图片]'
       enqueueAnalysis(channelKey, session.messageId)
+    }
+
+    if (analyzed.hasAudio && (session.isDirect || directAt)) {
+      try {
+        const { loadConfig } = require('./runtime-config')
+        const cfg = await loadConfig()
+        const transcribed = await Promise.race([
+          transcribeVoice(session, cfg),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('asr timeout')), 10000)),
+        ])
+        if (transcribed) {
+          plain = `[语音转文字：${transcribed}]`
+        } else {
+          plain = '[语音消息]'
+        }
+      } catch {
+        plain = '[语音消息]'
+      }
     }
 
     const currentUserId = session.userId || session.author?.id || session.username
@@ -1192,10 +1211,26 @@ exports.apply = (ctx) => {
         const chatResult = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
         const reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText, randomTriggered })
         if (!reply) return
+        if (randomTriggered && inGuild) {
+          const { shouldTriggerRandomVoice, markChannelCooldown, synthesizeSpeech, sendVoiceMessage, resolvePersonaVoice, extractVoiceStyle, stripVoiceStyleTag } = require('./tts')
+          if (shouldTriggerRandomVoice(channelKey)) {
+            const resolved = resolvePersona(channelKey, currentUserId)
+            const voiceOpts = resolvePersonaVoice(resolved.name)
+            const styleOverride = extractVoiceStyle(reply)
+            if (styleOverride) voiceOpts.style = styleOverride
+            const ttsText = stripVoiceStyleTag(reply)
+            const buf = await synthesizeSpeech(ttsText, voiceOpts)
+            if (buf) {
+              const sent = await sendVoiceMessage(session, buf)
+              if (sent) { markChannelCooldown(channelKey); return }
+            }
+          }
+        }
         if (inGuild && /别问了，这个我不聊/.test(reply)) {
           notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})
         }
-        return safeSendReply(ctx, session, reply, randomTriggered)
+        const finalReply = reply.replace(/【语音风格[：:][^】]+】/g, '').trim() || reply
+        return safeSendReply(ctx, session, finalReply, randomTriggered)
       } catch (err) {
         const m = err && err.message ? String(err.message) : ''
         const code = err && err.code ? String(err.code) : ''

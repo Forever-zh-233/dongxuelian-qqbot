@@ -558,6 +558,10 @@ async function main() {
     agentToolSetUserTimezone: path.join(LIB, 'agent', 'tools', 'set-user-timezone'),
     agentToolQueryLogs: path.join(LIB, 'agent', 'tools', 'query-logs'),
     index: path.join(LIB, 'index'),
+    voice: path.join(LIB, 'voice'),
+    tts: path.join(LIB, 'tts'),
+    imageStore: path.join(LIB, 'image-store'),
+    imageAnalyzer: path.join(LIB, 'image-analyzer'),
     help: path.join(HELP, 'index'),
   }
   for (const [name, modulePath] of Object.entries(modPaths)) {
@@ -762,6 +766,22 @@ async function main() {
     agentToolGetTokenUsage: ['execute'],
     agentToolSetUserTimezone: ['execute'],
     agentToolQueryLogs: ['execute'],
+    voice: [
+      'extractVoicePayload', 'downloadVoiceFile', 'convertToWav', 'callModelAsr', 'transcribeVoice',
+    ],
+    tts: [
+      'synthesizeSpeech', 'sendVoiceMessage', 'resolvePersonaVoice',
+      'extractVoiceStyle', 'stripVoiceStyleTag', 'getBuiltinVoices',
+      'isChannelOnCooldown', 'markChannelCooldown', 'shouldTriggerRandomVoice', 'getMimoriumKey',
+    ],
+    imageStore: [
+      'storeImageUrl', 'getImageEntry', 'getRecentImages', 'markAnalyzed',
+      'isAlreadyAnalyzed', 'getCachedAnalysis', 'replaceImagePlaceholder',
+      'cacheImageFile', 'readCachedImage', 'enforceChannelCacheLimit',
+    ],
+    imageAnalyzer: [
+      'enqueueAnalysis',
+    ],
   }
   for (const [moduleName, names] of Object.entries(expectedExports)) {
     const target = modules[moduleName]
@@ -882,6 +902,10 @@ async function main() {
     path.join(LIB, 'agent', 'tools', 'get-token-usage.js'),
     path.join(LIB, 'agent', 'tools', 'set-user-timezone.js'),
     path.join(LIB, 'agent', 'tools', 'query-logs.js'),
+    path.join(LIB, 'voice.js'),
+    path.join(LIB, 'tts.js'),
+    path.join(LIB, 'image-store.js'),
+    path.join(LIB, 'image-analyzer.js'),
     path.join(HELP, 'index.js'),
     __filename,
   ]

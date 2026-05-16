@@ -209,6 +209,15 @@ function extractImageUrls(content = '') {
   return [...new Set(urls)]
 }
 
+function extractVoiceUrls(content = '') {
+  const urls = []; let match
+  const cqRegex = /\[CQ:record[^\]]*?url=([^,\]\s]+)[^\]]*\]/gi
+  while ((match = cqRegex.exec(content)) !== null) { const u = normalizeUrl(match[1]); if (u) urls.push(u) }
+  const attrRegex = /<record[^>]*?url\s*=\s*["']([^"']+)["'][^>]*\/?>/gi
+  while ((match = attrRegex.exec(content)) !== null) { const u = normalizeUrl(match[1]); if (u && !urls.includes(u)) urls.push(u) }
+  return [...new Set(urls)]
+}
+
 function sanitizeFileToken(value = '') { return String(value || '').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'unknown' }
 
 function safeJsonStringify(value) {
@@ -441,7 +450,7 @@ module.exports = {
   sleep, getRandomDelayMs, shouldTriggerRandom,
   parseEnabledText,
   getBaseHostname, isDashScopeConfig, isOpenAIOfficialConfig,
-  normalizeUrl, extractImageUrls,
+  normalizeUrl, extractImageUrls, extractVoiceUrls,
   sanitizeFileToken, safeJsonStringify,
   normalizeReplyFingerprint,
   longestCommonSubstringLength, charSetJaccardOverlap,
