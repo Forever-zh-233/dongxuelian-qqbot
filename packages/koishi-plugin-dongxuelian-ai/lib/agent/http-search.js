@@ -298,7 +298,7 @@ function isHomepageUrl(url = '') {
     const parsed = new URL(String(url || ''))
     const path = parsed.pathname.replace(/\/+$/, '')
     if (!path || path === '/index' || path === '/index.html' || path === '/home') return true
-    if (/kurogames\.com$/i.test(parsed.hostname) && /^\/(main|zh-Hans\/main)(\/news)?$/i.test(path)) return true
+    if (/kurogames\.com$/i.test(parsed.hostname) && /^\/(main|zh-Hans\/main)$/i.test(path)) return true
     if (/baike\.baidu\.com/i.test(parsed.hostname)) return true
     if (/zdic\.net|chagushici\.com|dict\./i.test(parsed.hostname)) return true
     return false

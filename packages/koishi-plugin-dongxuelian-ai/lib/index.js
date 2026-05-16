@@ -29,7 +29,8 @@ const { analyzeIncomingMessage, normalizeText } = require('./message-reader')
 const { loadStickerCache, sendReply } = require('./reply')
 const { resolveForwardSummary } = require('./forward')
 const { prepareVisionRequest, isVisionSession } = require('./vision')
-const { storeImageUrl } = require('./image-store')
+const { storeImageUrl, cacheImageFile } = require('./image-store')
+const { enqueueAnalysis } = require('./image-analyzer')
 const {
   classifySendError,
   sanitizeForRateLimit,
@@ -109,14 +110,13 @@ const {
   pickJailbreakFallbackReply,
   readTextFile, writeTextFile, readJsonFile, writeJsonFile,
   shouldTriggerRandom, calculateWillFactor,
-  normalizeUrl,
+  normalizeUrl, extractImageUrls,
   sanitizeFileToken, safeJsonStringify,
   todayCst,
 } = require('./utils')
 const { logDebug } = require('./logging-config')
 const { heuristicRoute, buildExplicitSearchRunOptions } = require('./agent/router')
 const agentEngine = require('./agent/engine')
-const { startMcp, stopMcp } = require('./mcp')
 const { enqueueAgentTask, configureAgentQueue } = require('./agent/queue')
 const { recordAgentChatResult } = require('./agent-chat-bridge')
 
@@ -301,9 +301,9 @@ function handleChatResult(chatResult, { ctx, session, channelKey, currentUserId,
     }).then(agentResult => {
       recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult })
       const raw = agentResult.reply || '(搜索未获取有效结果)'
-      const { sanitizeReply, trimReply, MAX_OUTPUT_CHARS_FRIENDLY } = require('./utils')
-      const { isUnsafeThinkingReply } = require('./reply-guard')
-      const { JAILBREAK_OUTPUT_RE, pickJailbreakFallbackReply, hasBannedOutput, hasInternalContextLeak } = require('./constants')
+      const { sanitizeReply, trimReply, MAX_OUTPUT_CHARS_FRIENDLY, hasBannedOutput } = require('./utils')
+      const { isUnsafeThinkingReply, hasInternalContextLeak } = require('./reply-guard')
+      const { JAILBREAK_OUTPUT_RE, pickJailbreakFallbackReply } = require('./constants')
       let filtered = raw
       if (JAILBREAK_OUTPUT_RE.test(filtered)) filtered = pickJailbreakFallbackReply()
       if (hasBannedOutput(filtered)) filtered = '这活别找我，换个工具。'
@@ -697,7 +697,6 @@ exports.apply = (ctx) => {
     } catch (error) {
       ctx.logger('dongxuelian-ai').warn(`agent cron scheduler restore failed: ${error.message}`)
     }
-    startMcp(ctx.logger('dongxuelian-ai'))
     ctx.logger('dongxuelian-ai').info(`dongxuelian-ai ${PLUGIN_VERSION} loaded`)
   })
 
@@ -728,7 +727,7 @@ exports.apply = (ctx) => {
     } catch {}
 
     const analyzed = analyzeIncomingMessage(session, { sanitizeUserName })
-    const plain = collapseRepeatedBotCalls(stripMentions(analyzed.plain || content))
+    let plain = collapseRepeatedBotCalls(stripMentions(analyzed.plain || ''))
     const memoryText = normalizeText(stripMentions(analyzed.memory || plain))
     const directAt = isDirectAtBot(session)
 
@@ -748,7 +747,7 @@ exports.apply = (ctx) => {
       }
     }
 
-    if (!plain && !directAt) return next()
+    if (!plain && !directAt && !session.isDirect && !analyzed.hasVisual) return next()
 
     logDebug(ctx, 'middleware', `entry userId=${session.userId} isDirect=${!!session.isDirect} guildId=${session.guildId} type=${session.type} subtype=${session.subtype} contentLen=${(session.content || '').length}`)
     logDebug(ctx, 'middleware', `plain=${JSON.stringify(plain).slice(0, 100)} directAt=${directAt} isDirect=${!!session.isDirect}`)
@@ -761,8 +760,17 @@ exports.apply = (ctx) => {
 
     if (analyzed.hasVisual && channelKey && session.messageId) {
       const segments = Array.isArray(session.event?.message) ? session.event.message : []
-      const imgUrl = segments.find(s => s.type === 'image')?.data?.url
-      if (imgUrl) storeImageUrl(channelKey, session.messageId, imgUrl)
+      const imgSeg = segments.find(s => s.type === 'image')
+      const imgFile = imgSeg?.data?.file || null
+      const imgUrl = imgSeg?.data?.url || ''
+      if (imgUrl && /^https?:\/\//.test(imgUrl)) {
+        storeImageUrl(channelKey, session.messageId, imgUrl, imgFile)
+      } else if (imgSeg) {
+        const fallbackUrl = extractImageUrls(content)[0]
+        if (fallbackUrl) storeImageUrl(channelKey, session.messageId, fallbackUrl, imgFile)
+      }
+      if (!plain.includes('[图片]')) plain = (plain ? plain + ' ' : '') + '[图片]'
+      enqueueAnalysis(channelKey, session.messageId)
     }
 
     const currentUserId = session.userId || session.author?.id || session.username

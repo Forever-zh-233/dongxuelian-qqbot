@@ -305,6 +305,10 @@ function trimReply(text = '', maxChars = MAX_OUTPUT_CHARS_FRIENDLY) {
 function sanitizeReply(text = '', userName = '') {
   let t = String(text).replace(/^(根据|作为|我是|我的角色)\S{0,20}[:：，。\s]?/g, '').trim()
   t = t.replace(/https?:\/\/multimedia\.nt\.qq\.com\.cn\/[^\s）)》\]]*\s*/g, '').trim()
+  t = t.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim()
+  t = t.replace(/<tool_call>\s*<function=[^>]*>[\s\S]*?<\/function>\s*<\/tool_call>/gi, '').trim()
+  t = t.replace(/<tool_call>[^<]*<function=[^<]*<\/function>[^<]*<\/tool_call>/gi, '').trim()
+  if (!t) t = String(text).replace(/<tool_call>[\s\S]*$/gi, '').trim()
   if (userName) {
     const esc = userName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     t = t.replace(new RegExp('(?<!的)' + esc + '(?=[，,。！!？?]?\\s*$)'), '')

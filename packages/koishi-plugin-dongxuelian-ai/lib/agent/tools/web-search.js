@@ -103,31 +103,6 @@ async function browserSearch(queries, reason) {
 }
 
 async function fallbackSearch(queries, reason) {
-  // MCP 远程浏览器优先
-  try {
-    const mcp = require('../../mcp')
-    if (mcp.isAvailable()) {
-      const query = Array.isArray(queries) ? queries[0] : String(queries)
-      const result = await mcp.callTool('browser_search', { query })
-      if (result.ok && result.content && result.content.length > 0) {
-        const rawText = result.content.map(c => c.text || '').join('\n').trim()
-        if (rawText.length > 20) {
-          let parsed = []
-          try { parsed = JSON.parse(rawText) } catch {}
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const { rankSearchCandidates, formatSearchResults } = require('../search-results')
-            const ranked = rankSearchCandidates(parsed, query)
-            if (ranked.length > 0) {
-              const formatted = formatSearchResults(query, ranked)
-              const pageTexts = parsed.filter(r => r.text && r.text.length > 80).map(r => `【${r.title}】\n${r.text}`).join('\n\n')
-              return `${reason}\n已通过 MCP 远程浏览器搜索。\n${formatted}${pageTexts ? '\n\n--- 正文摘要 ---\n' + pageTexts : ''}`
-            }
-          }
-          return `${reason}\n已通过 MCP 远程浏览器搜索。\n${rawText}`
-        }
-      }
-    }
-  } catch {}
   const httpResult = await runHttpSearch(queries)
   if (httpResult.ok) return `${reason}\n已改用轻量 HTTP 搜索（未启动 Chromium）。\n${httpResult.text}`
   if (isBrowserSearchEnabled()) {

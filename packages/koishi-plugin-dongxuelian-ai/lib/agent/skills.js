@@ -7,6 +7,7 @@
 const fs = require('fs')
 const path = require('path')
 const { SKILLS_DIR, SKILLS_LORE_DIR } = require('../constants')
+const { SKILL_POOL_DIR } = require('./skills/store')
 
 const SKILL_DIRS = [
   { kind: 'lore', dir: SKILLS_LORE_DIR },
@@ -172,6 +173,23 @@ function listAgentSkills() {
     try { entries = fs.readdirSync(group.dir, { withFileTypes: true }) } catch { continue }
     for (const entry of entries) skillCollectEntry(skills, group, entry, group.dir)
   }
+  const poolGroup = { kind: 'pool', dir: SKILL_POOL_DIR }
+  try {
+    const poolEntries = fs.readdirSync(SKILL_POOL_DIR, { withFileTypes: true })
+    for (const entry of poolEntries) {
+      if (!entry.isDirectory()) continue
+      const directorySkill = path.join(SKILL_POOL_DIR, entry.name, DIRECTORY_SKILL_FILE)
+      const legacyFiles = (() => { try { return fs.readdirSync(path.join(SKILL_POOL_DIR, entry.name)).filter(f => LEGACY_SKILL_RE.test(f)) } catch { return [] } })()
+      if (fs.existsSync(directorySkill)) {
+        const skill = skillBuildEntry(poolGroup, directorySkill, { rootDir: path.join(SKILL_POOL_DIR, entry.name), isDirectorySkill: true, name: entry.name })
+        if (skill) skills.push(skill)
+      } else if (legacyFiles.length) {
+        const file = path.join(SKILL_POOL_DIR, entry.name, legacyFiles[0])
+        const skill = skillBuildEntry(poolGroup, file, { rootDir: path.join(SKILL_POOL_DIR, entry.name), isDirectorySkill: false })
+        if (skill) skills.push(skill)
+      }
+    }
+  } catch {}
   return skills.sort((a, b) => `${a.kind}:${a.name}`.localeCompare(`${b.kind}:${b.name}`, 'zh-Hans-CN'))
 }
 

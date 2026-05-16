@@ -7,9 +7,10 @@
 const { getMemorySummary } = require('./conversation')
 
 const CHAT_TOOL_TIMEOUT_MS = 3000
+const CHAT_TOOL_ANALYZE_TIMEOUT_MS = 25000
 const CHAT_TOOLS_TOTAL_DEADLINE_MS = 5000
 
-const LIGHTWEIGHT_TOOLS = new Set(['get_current_time', 'calculate', 'search_memory', 'read_image_history'])
+const LIGHTWEIGHT_TOOLS = new Set(['get_current_time', 'calculate', 'search_memory', 'read_image_history', 'analyze_historical_image'])
 
 const HEAVY_TOOLS = new Set(['web_search', 'browser_action', 'execute_shell', 'file_write'])
 
@@ -59,10 +60,25 @@ function getChatToolDefinitions() {
       type: 'function',
       function: {
         name: 'read_image_history',
-        description: '查看群聊最近出现的图片记录（URL + 时间戳 + 是否已分析）',
+        description: '查看群聊最近出现的图片记录（URL + 时间戳 + 是否已分析）。已分析的图片会附带内容描述。',
         parameters: {
           type: 'object',
           properties: { limit: { type: 'number', description: '返回最近几张，默认 5' } },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'analyze_historical_image',
+        description: '分析群聊历史中某张未分析的图片。需要用户明确问到图片内容时才调用，不要主动调用。',
+        parameters: {
+          type: 'object',
+          properties: {
+            messageId: { type: 'string', description: '图片消息 ID（从 read_image_history 获取）' },
+            question: { type: 'string', description: '用户关于这张图的问题' },
+          },
           required: [],
         },
       },
@@ -130,8 +146,21 @@ async function executeChatTool(toolCall, context = {}) {
       return images.map((img, i) => {
         const time = new Date(img.ts).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
         const status = img.analyzed ? `已分析: ${(img.analysis || '').slice(0, 80)}` : '未分析'
-        return `${i + 1}. [${time}] ${status}`
+        return `${i + 1}. [${time}] msgId=${img.messageId} ${status}`
       }).join('\n')
+    }
+    case 'analyze_historical_image': {
+      const { getImageEntry, getCachedAnalysis } = require('./image-store')
+      const { enqueueAnalysis } = require('./image-analyzer')
+      const ck = context.channelKey || ''
+      const msgId = String(args.messageId || '').trim()
+      if (!ck || !msgId) return '需要提供 messageId（从 read_image_history 获取）。'
+      const cached = getCachedAnalysis(ck, msgId)
+      if (cached) return `图片内容：${cached}`
+      const entry = getImageEntry(ck, msgId)
+      if (!entry) return '找不到该图片记录。'
+      enqueueAnalysis(ck, msgId)
+      return '该图片正在后台分析中，稍后可通过 read_image_history 查看结果。'
     }
     default:
       return null
@@ -152,10 +181,11 @@ async function handleChatToolCalls(toolCalls, context = {}) {
       continue
     }
     if (Date.now() >= deadline) break
+    const timeout = name === 'analyze_historical_image' ? CHAT_TOOL_ANALYZE_TIMEOUT_MS : CHAT_TOOL_TIMEOUT_MS
     try {
       const resultPromise = executeChatTool(tc, context)
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('tool timeout')), CHAT_TOOL_TIMEOUT_MS)
+        setTimeout(() => reject(new Error('tool timeout')), timeout)
       )
       const result = await Promise.race([resultPromise, timeoutPromise])
       results.push({ tool_call_id: tc.id, role: 'tool', content: String(result || '') })
@@ -167,8 +197,19 @@ async function handleChatToolCalls(toolCalls, context = {}) {
   return { results, heavyTools }
 }
 
-function getChatToolSystemHint() {
-  return '你有辅助工具可用。只在确实需要时自主调用，不要告诉用户你使用了工具，把结果自然融入回复。大多数聊天不需要工具，直接回复即可。'
+function getChatToolSystemHint(channelKey) {
+  let hint = '你有辅助工具可用。只在确实需要时自主调用，不要告诉用户你使用了工具，把结果自然融入回复。大多数聊天不需要工具，直接回复即可。read_image_history 返回的图片分析结果只能作为聊天背景知识，绝对不能主动提起图片内容，只有用户明确问到图片时才可以引用。'
+  if (channelKey) {
+    try {
+      const { getRecentImages } = require('./image-store')
+      const recent = getRecentImages(channelKey, 10)
+      if (recent.length > 0) {
+        const analyzed = recent.filter(img => img.analyzed).length
+        hint += `\n[图片上下文] 本群最近有${recent.length}张图片记录（${analyzed}张已分析）。如果用户提到"刚才的图"、"那张图"等，可用 read_image_history 查看。`
+      }
+    } catch {}
+  }
+  return hint
 }
 
 module.exports = {

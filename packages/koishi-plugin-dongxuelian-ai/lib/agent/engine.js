@@ -84,6 +84,22 @@ async function executeAgentToolCall({ tc, messages, allowedToolNames, channel, c
   }
 }
 
+const COMPRESS_TOOL_RESULT_THRESHOLD = 1500
+
+function compressOldToolResults(messages, currentRound) {
+  let toolMsgCount = 0
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role !== 'tool') continue
+    toolMsgCount++
+    const totalToolMsgs = messages.filter(m => m.role === 'tool').length
+    if (toolMsgCount >= totalToolMsgs - 1) break
+    const content = messages[i].content || ''
+    if (content.length > COMPRESS_TOOL_RESULT_THRESHOLD) {
+      messages[i] = { ...messages[i], content: content.slice(0, 400) + '\n...[已截断旧工具结果]...' }
+    }
+  }
+}
+
 async function continueAgent({ messages, config, tools, allowedToolNames, channel, channelKey, userId, userName, userMessage, toolCount = 0, toolResults = [], onProgress, bot, enableThinking = false }) {
   let reply = ''
   const rounds = []
@@ -170,6 +186,8 @@ async function continueAgent({ messages, config, tools, allowedToolNames, channe
     }
 
     rounds.push({ round, reasoning: response.reasoning || '', toolCalls: roundToolCalls, toolResults: roundToolResults })
+
+    if (round >= 2) compressOldToolResults(messages, round)
 
     let estimated = estimateTokens(messages)
     if (estimated > 60000) {

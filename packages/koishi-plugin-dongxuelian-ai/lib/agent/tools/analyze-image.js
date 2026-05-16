@@ -1,11 +1,11 @@
 /**
  * Agent 工具: analyze_historical_image — 分析图片历史中的某张图片。
- * 下载图片 → 调用视觉模型 → 写回分析结果到 image-store + 对话历史。
+ * 优先读本地缓存 → NapCat 缓存 → URL 下载 → 调视觉模型 → 写回分析结果。
  */
 const { downloadImageAsBase64, isVisionModel } = require('../../api')
 const { requestChatCompletions } = require('../../api')
 const { loadConfig } = require('../../runtime-config')
-const { markAnalyzed, getImageEntry, replaceImagePlaceholder } = require('../../image-store')
+const { markAnalyzed, getImageEntry, replaceImagePlaceholder, readCachedImage } = require('../../image-store')
 
 module.exports = {
   definition: {
@@ -26,10 +26,14 @@ module.exports = {
     let url = String(params.url || '').trim()
     const messageId = String(params.messageId || '').trim()
     const question = String(params.question || '描述这张图片的内容').trim()
+    let cachedFile = null
 
     if (!url && messageId && channelKey) {
       const entry = getImageEntry(channelKey, messageId)
-      if (entry) url = entry.url
+      if (entry) {
+        url = entry.url
+        cachedFile = entry.file || null
+      }
     }
     if (!url) return '无法获取图片 URL。请先用 read_image_history 查看可用图片。'
 
@@ -38,7 +42,18 @@ module.exports = {
       return '当前模型不支持视觉分析。'
     }
 
-    const base64 = await downloadImageAsBase64(url, 10000)
+    let base64 = null
+    if (messageId && channelKey) {
+      base64 = readCachedImage(channelKey, messageId)
+    }
+    if (!base64 && cachedFile) {
+      const { callGetImage, readImageAsBase64 } = require('../../api')
+      try {
+        const imgInfo = await callGetImage(cachedFile)
+        if (imgInfo && imgInfo.file) base64 = await readImageAsBase64(imgInfo.file)
+      } catch {}
+    }
+    if (!base64) base64 = await downloadImageAsBase64(url, 10000)
     if (!base64) return '图片下载失败或格式不支持。'
 
     const messages = [

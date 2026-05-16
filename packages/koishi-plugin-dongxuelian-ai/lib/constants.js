@@ -18,6 +18,7 @@ const PLUGIN_VERSION = '1.1.5'
 const KEY_FILE = path.join(DATA_DIR, 'ai-openai-key.txt')
 const MODEL_FILE = path.join(DATA_DIR, 'ai-model.txt')
 const BASE_URL_FILE = path.join(DATA_DIR, 'ai-base-url.txt')
+const VOICES_DIR = path.join(DATA_DIR, 'ai-voices')
 const SKILLS_DIR = path.join(DATA_DIR, 'ai-skills')
 const SKILLS_CORE_DIR = path.join(SKILLS_DIR, 'core')
 const SKILLS_MODES_DIR = path.join(SKILLS_DIR, 'modes')
@@ -122,6 +123,7 @@ const RESERVED_PREFIXES = ['昵称', '删除昵称', '查看昵称', '查看集�
 module.exports = {
   DATA_DIR, PLUGIN_VERSION,
   KEY_FILE, MODEL_FILE, BASE_URL_FILE,
+  VOICES_DIR,
   SKILLS_DIR, SKILLS_CORE_DIR, SKILLS_MODES_DIR, SKILLS_PERSONAS_DIR, SKILLS_LORE_DIR,
   LORE_TRIGGER_SET, TERRA_LORE_TRIGGER_SET,
   PERSONA_GROUPS_FILE, PERSONA_USERS_FILE, EVENT_DUMP_DIR,

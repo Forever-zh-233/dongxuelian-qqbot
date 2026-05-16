@@ -147,8 +147,10 @@ function classifySearchResult(ranked = [], pages = []) {
   const hasPageContent = pages.some(p => p.text && p.text.length >= 80)
   const hasHighScore = ranked.some(r => (r.score || 0) >= 50)
   const hasVeryHighScore = ranked.some(r => (r.score || 0) >= 80)
+  const hasTrustedDirect = ranked.some(r => (r.score || 0) >= 100)
   if (hasPageContent && hasHighScore) return 'usable_hit'
   if (hasVeryHighScore && pages.some(p => p.text && p.text.length >= 40)) return 'usable_hit'
+  if (hasTrustedDirect && pages.some(p => p.text && p.text.length >= 20)) return 'usable_hit'
   if (ranked.length > 0) return 'weak_hit'
   return 'hard_fail'
 }

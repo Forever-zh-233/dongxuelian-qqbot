@@ -66,6 +66,7 @@ const {
   isConsecutiveUserRepeat,
   isUnsafeThinkingReply,
   stripStickerMarkersForGuard,
+  hasInternalContextLeak,
 } = require('./reply-guard')
 const {
   loadConfig,
@@ -164,9 +165,6 @@ function isContextJailbroken(session) {
   return recentReplies.filter(r => CONTEXT_JAILBREAK_WEAK_RE.test(r)).length >= 2
 }
 
-function hasInternalContextLeak(text = '') {
-  return /(?:这是你在本群的发言|这是.{0,20}在本群的发言|昵称：|发言：|<user>|<\/user>|\[群聊刷到\]|\[内部参考-用户近期发言风格\])/.test(String(text || ''))
-}
 
 // 提取当前发言者 QQ 号，管理员权限统一按这个 ID 判断。
 
@@ -870,7 +868,7 @@ async function chat(session, userText, ctx, options = {}) {
 
   // Chat 轻量工具注入
   const chatTools = getChatToolDefinitions()
-  messages.push({ role: 'system', content: getChatToolSystemHint() })
+  messages.push({ role: 'system', content: getChatToolSystemHint(channelKey) })
 
   let reply = await callOpenAI(messages, options.randomTriggered, {}, chatTools)
 
@@ -913,6 +911,18 @@ async function chat(session, userText, ctx, options = {}) {
   // 记录 AI 提问"需要记住"的时间戳，供 memory 确认超时使用
   if (/需要.{0,10}记住/.test(reply)) {
     lastMemoryPromptTs.set(currentUserId + ':' + channelKey, Date.now())
+  }
+
+  // 模型输出文本格式 tool_call 时，strip 后重试（不带 tools）
+  if (typeof reply === 'string' && /<tool_call>/i.test(reply)) {
+    const stripped = reply.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/<tool_call>[\s\S]*$/gi, '').trim()
+    if (stripped && stripped.length > 5) {
+      reply = stripped
+    } else {
+      messages.push({ role: 'assistant', content: reply })
+      messages.push({ role: 'user', content: '【系统提示：不要输出工具调用格式，直接用自然语言回答。】' })
+      reply = await callOpenAI(messages, options.randomTriggered)
+    }
   }
 
   if (JAILBREAK_OUTPUT_RE.test(reply)) {
