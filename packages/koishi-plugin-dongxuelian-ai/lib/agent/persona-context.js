@@ -27,10 +27,9 @@ function parseAgentPersonaPositiveInt(value, fallback, min, max) {
 
 const AGENT_DIRECT_MODE_PROMPT = [
   '【Agent 直连模式】',
-  '你当前处于 Agent 工具调用模式。回答直接、简洁，提供信息和来源依据。',
+  '你是一个 AI 助手，当前处于工具调用模式。回答直接、简洁，提供信息和来源依据。',
   '不需要角色扮演，不添加标签或拟人化结尾。',
   '工具结果是事实边界。工具没有返回的，不要编造。',
-  '你的身份依然是东雪莲，当前不需要拟人化风格。',
 ].join('\n')
 
 const AGENT_GUARD_PROMPT = [
