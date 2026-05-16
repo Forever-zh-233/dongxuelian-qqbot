@@ -297,10 +297,20 @@ function handleChatResult(chatResult, { ctx, session, channelKey, currentUserId,
       channelKey,
       userId: currentUserId,
       timeoutMs: agentConfig.queue?.timeoutMs,
-      fn: () => agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions }),
+      fn: () => agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, agentMode: true, ...searchRunOptions }),
     }).then(agentResult => {
       recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult })
-      return safeSendReply(ctx, session, agentResult.reply || '(搜索未获取有效结果)', false)
+      const raw = agentResult.reply || '(搜索未获取有效结果)'
+      const { sanitizeReply, trimReply, MAX_OUTPUT_CHARS_FRIENDLY } = require('./utils')
+      const { isUnsafeThinkingReply } = require('./reply-guard')
+      const { JAILBREAK_OUTPUT_RE, pickJailbreakFallbackReply, hasBannedOutput, hasInternalContextLeak } = require('./constants')
+      let filtered = raw
+      if (JAILBREAK_OUTPUT_RE.test(filtered)) filtered = pickJailbreakFallbackReply()
+      if (hasBannedOutput(filtered)) filtered = '这活别找我，换个工具。'
+      if (isUnsafeThinkingReply(filtered)) filtered = '我还有事，下次再说。'
+      if (hasInternalContextLeak(filtered)) filtered = '我刚刚串台了，重说一句。'
+      filtered = trimReply(sanitizeReply(filtered, userName), MAX_OUTPUT_CHARS_FRIENDLY)
+      return safeSendReply(ctx, session, filtered, false)
     }).catch(error => {
       ctx.logger('dongxuelian-ai').warn(`chat heavy-tool agent failed: ${error.message}`)
     })
@@ -1173,7 +1183,7 @@ exports.apply = (ctx) => {
         }
         const chatResult = await chat(session, userText, ctx, { randomTriggered, sharedContextNote, quotedMessageNote, forwardSummaryText, mentionUserIds, replyToId: analyzed.replyToId })
         const reply = handleChatResult(chatResult, { ctx, session, channelKey, currentUserId, userName, userText, randomTriggered })
-        if (reply === null) return
+        if (!reply) return
         if (inGuild && /别问了，这个我不聊/.test(reply)) {
           notifySensitiveHandlers(session, channelKey, { throttle: true }).catch(() => {})
         }

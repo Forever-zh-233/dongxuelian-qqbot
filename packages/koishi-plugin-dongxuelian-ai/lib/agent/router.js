@@ -5,6 +5,7 @@
  * 状态: 无。
  */
 const { cleanExplicitSearchQuery, buildSearchQueries } = require('./search-query')
+const { getAgentConfig } = require('./config')
 
 const EXPLICIT_AGENT_RE = /(?:调用\s*(?:搜索工具|web_search)|web_search|上网查|联网查|联网搜索|网上查|搜一下|搜索一下|帮我查|查一下).{0,80}(?:最新|现在|当前|版本|角色|新闻|资料|是谁|是什么)|(?:最新角色|当前版本|现在是什么版本)/i
 const EXPLICIT_SEARCH_RE = /(?:调用\s*(?:搜索工具|web_search)|web_search|上网查|联网查|联网搜索|网上查|搜一下|搜索一下|帮我查|查一下|最新角色|当前版本|现在是什么版本)/i
@@ -13,6 +14,9 @@ function heuristicRoute(userText = '', channel = 'qq') {
   const text = String(userText || '').trim()
   if (!text) return { useAgent: false, reason: 'empty' }
   if (EXPLICIT_AGENT_RE.test(text)) return { useAgent: true, reason: 'explicit-tool-request' }
+  const config = getAgentConfig()
+  const autoRoute = config.autoRoute && config.autoRoute[channel]
+  if (!autoRoute || !autoRoute.enabled) return { useAgent: false, reason: 'auto-route-disabled' }
   return { useAgent: false, reason: 'chat-with-tools' }
 }
 

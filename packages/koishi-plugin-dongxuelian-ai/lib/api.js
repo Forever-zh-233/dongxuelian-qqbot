@@ -161,6 +161,10 @@ async function requestChatCompletions(messages, config, extraBody = {}, tools = 
     let content = m.content && m.content.trim() ? m.content : ''
     const reasoning = m.reasoning_content || ''
 
+    if (content && /<think>[\s\S]*?<\/think>/i.test(content)) {
+      content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+    }
+
     if (!content && reasoning) {
       const fbStep = (config._fallbackTried || 0) + 1
       const fbConfig = await buildFallbackConfig(config, fbStep, fallbackSet)

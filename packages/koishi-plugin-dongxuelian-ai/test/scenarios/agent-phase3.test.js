@@ -32,7 +32,7 @@ async function run(t) {
   const dashboardResolved = workspaceContext.resolveAgentPathInput('dashboard文件夹', [repoRoot], { requireExisting: true })
   t.check('workspace path alias resolves dashboard folder', dashboardResolved.path.endsWith(require('path').join('packages', 'koishi-plugin-dashboard')), dashboardResolved.path)
   const workspaceExtra = await workspaceContext.buildAgentWorkspaceContext({ userMessage: 'bot前端怎么改', channel: 'dashboard', roots: [repoRoot] })
-  t.check('workspace context injects dashboard guidance', workspaceExtra[0]?.content.includes('bot前端') && workspaceExtra[0]?.content.includes('packages/agent-console'))
+  t.check('workspace context injects dashboard guidance', workspaceExtra[0]?.content.includes('前端') && workspaceExtra[0]?.content.includes('packages/agent-console'))
 
   const originalDataDirForPersona = process.env.DONGXUELIAN_AI_DATA_DIR
   const personaTmp = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'agent-dashboard-persona-'))

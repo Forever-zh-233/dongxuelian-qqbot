@@ -130,7 +130,7 @@ async function executeChatTool(toolCall, context = {}) {
       return images.map((img, i) => {
         const time = new Date(img.ts).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
         const status = img.analyzed ? `已分析: ${(img.analysis || '').slice(0, 80)}` : '未分析'
-        return `${i + 1}. [${time}] ${status}\n   URL: ${img.url}`
+        return `${i + 1}. [${time}] ${status}`
       }).join('\n')
     }
     default:

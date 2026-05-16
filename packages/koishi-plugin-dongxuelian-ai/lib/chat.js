@@ -526,10 +526,11 @@ async function chat(session, userText, ctx, options = {}) {
       saveConversationTurn(session, currentUserMessage, jbReply)
       return jbReply
     }
+    const retellTime = `当前时间：${now.getFullYear()}年${pad2(now.getMonth()+1)}月${pad2(now.getDate())}日 ${pad2(now.getHours())}时${pad2(now.getMinutes())}分。`
     const agentMessages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'system', content: dynamicTimePrompt },
-      { role: 'system', content: `以下是工具查到的信息，用你的风格简短告诉用户结果，不要提及工具或搜索过程：\n${agentText}` },
+      { role: 'system', content: '简短转述以下信息给用户。不要提及工具、搜索过程。结果太长只说重点。' },
+      { role: 'system', content: retellTime },
+      { role: 'system', content: `以下是工具查到的信息：\n${agentText}` },
     ]
     const detectList2 = await readJsonFile(POLITICAL_DETECT_FILE, []).catch(() => [])
     if (Array.isArray(detectList2) && detectList2.includes(channelKey) && SENSITIVE_KEYWORDS_RE.test(cleanInput)) {
