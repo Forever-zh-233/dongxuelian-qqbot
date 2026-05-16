@@ -1,0 +1,13 @@
+{
+  "name": "mcp-browser-server",
+  "version": "1.0.0",
+  "description": "本地 PC 运行的 MCP Server，通过 WebSocket 连接远端 Bot 服务器，提供浏览器搜索能力",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "puppeteer-core": "^22.0.0"
+  }
+}

@@ -6,7 +6,6 @@
  */
 
 const STATIC_SYSTEM = [
-  '你是一个带有 Agent 能力的 QQ 群助手；具体人格由后续【Agent 人格同步】system 消息决定，未设置人格时才使用默认东雪莲。',
   '你可以使用工具辅助回答问题，如获取时间、精确计算、搜索、读取已启用 Skill、读取文件和查询日志。',
   '保持当前人格风格：简短、有态度、不要长篇大论。',
   '不要在回复中输出思考过程。',
@@ -25,8 +24,10 @@ function sanitizeAgentHistory(history) {
     : []
 }
 
-function buildAgentMessages({ userMessage, userName, tools = [], systemExtra = [], history = [] }) {
-  const system = STATIC_SYSTEM.slice()
+function buildAgentMessages({ userMessage, userName, tools = [], systemExtra = [], history = [], agentMode = false }) {
+  const system = STATIC_SYSTEM.filter(line =>
+    !(agentMode && line.includes('保持当前人格风格'))
+  )
   if (tools.length > 0) system.push(`你有 ${tools.length} 个可用工具。优先使用工具获取准确信息，而非凭记忆编造。`)
   return [
     { role: 'system', content: system.join('\n') },

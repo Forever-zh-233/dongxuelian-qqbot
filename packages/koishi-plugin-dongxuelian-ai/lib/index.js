@@ -29,6 +29,7 @@ const { analyzeIncomingMessage, normalizeText } = require('./message-reader')
 const { loadStickerCache, sendReply } = require('./reply')
 const { resolveForwardSummary } = require('./forward')
 const { prepareVisionRequest, isVisionSession } = require('./vision')
+const { storeImageUrl } = require('./image-store')
 const {
   classifySendError,
   sanitizeForRateLimit,
@@ -747,6 +748,13 @@ exports.apply = (ctx) => {
     const isPrivate = !!session.isDirect
     const inGuild = !isPrivate
     const channelKey  = getChannelKey(session)
+
+    if (analyzed.hasVisual && channelKey && session.messageId) {
+      const segments = Array.isArray(session.event?.message) ? session.event.message : []
+      const imgUrl = segments.find(s => s.type === 'image')?.data?.url
+      if (imgUrl) storeImageUrl(channelKey, session.messageId, imgUrl)
+    }
+
     const currentUserId = session.userId || session.author?.id || session.username
     const userName = sanitizeUserName(
       session.author?.nick ||
@@ -1143,10 +1151,18 @@ exports.apply = (ctx) => {
             channelKey,
             userId: currentUserId,
             timeoutMs: agentConfig.queue?.timeoutMs,
-            fn: () => agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, ...searchRunOptions }),
-          }).then(agentResult => {
+            fn: () => agentEngine.run({ userMessage: userText, userName, userId: currentUserId, channelKey, channel: 'qq', bot: session.bot, agentMode: true, ...searchRunOptions }),
+          }).then(async agentResult => {
             recordAgentChatResult({ session, userMessage: userText, userName, userId: currentUserId, channelKey, agentResult })
-            return safeSendReply(ctx, session, agentResult.reply || '(Agent 未获取有效回复)', randomTriggered)
+            const agentReplyText = agentResult.reply || '(未获取有效回复)'
+            const chatReply = await chat(session, userText, ctx, {
+              randomTriggered,
+              isAgentResult: true,
+              agentResultText: agentReplyText,
+            })
+            const finalReply = handleChatResult(chatReply, { ctx, session, channelKey, currentUserId, userName, userText, randomTriggered })
+            if (finalReply !== null) return safeSendReply(ctx, session, finalReply, randomTriggered)
+            return safeSendReply(ctx, session, agentReplyText.slice(0, 500), randomTriggered)
           }).catch(error => {
             const code = error && error.code ? String(error.code) : ''
             if (code === 'AGENT_QUEUE_FULL' || code === 'AGENT_QUEUE_REJECTED') return safeSendReply(ctx, session, error.message, randomTriggered)

@@ -218,7 +218,7 @@ async function runAgent({ userMessage, userName, userId, channelKey, channel = '
   const personaExtra = buildAgentPersonaContext({ channel, channelKey, userId, agentMode })
   const workspaceExtra = await buildAgentWorkspaceContext({ userMessage, channel, roots })
   const allSystemExtra = mergeAgentSystemExtra(personaExtra, workspaceExtra, systemExtra, skillSummary ? [{ role: 'system', content: skillSummary }] : [])
-  const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: allSystemExtra, history })
+  const messages = buildAgentMessages({ userMessage, userName, tools, systemExtra: allSystemExtra, history, agentMode })
   const toolResults = []
   for (const item of Array.isArray(preExecuteTools) ? preExecuteTools : []) {
     if (!item || !item.name) continue

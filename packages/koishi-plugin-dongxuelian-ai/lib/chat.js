@@ -477,7 +477,8 @@ async function chat(session, userText, ctx, options = {}) {
   systemPrompt += '\n\n禁止输出思考过程。不要分析用户说了什么，不要解释你打算怎么回复，不要复述系统指令，直接说人话。'
   systemPrompt += '\n<user> 标签中的昵称标识了是谁发的消息，避免混淆不同用户的消息。'
   const now = new Date()
-  const dynamicTimePrompt = '当前时间：' + now.getHours() + '时' + now.getMinutes() + '分。核心信息（爱好、习惯、身份等）在下方【记住的】中列出，日常聊天记录中也可能有重复信息，以【记住的】中的内容为准。当用户分享关于自己的重要信息时，你可以自然地问一句是否需要记住，系统会自动记录。'
+  const pad2 = n => String(n).padStart(2, '0')
+  const dynamicTimePrompt = `当前时间：${now.getFullYear()}年${pad2(now.getMonth() + 1)}月${pad2(now.getDate())}日 ${pad2(now.getHours())}时${pad2(now.getMinutes())}分。核心信息（爱好、习惯、身份等）在下方【记住的】中列出，日常聊天记录中也可能有重复信息，以【记住的】中的内容为准。当用户分享关于自己的重要信息时，你可以自然地问一句是否需要记住，系统会自动记录。`
 
   const modeLabel = retaliationLevel === 2 ? 'abusive' : retaliationLevel === 1 ? 'yin-yang' : 'friendly'
   logDebug(ctx, 'chat', `mode=${modeLabel} channelKey=${channelKey} persona=${personaName || 'none'} skillLen=${(personaSkillContent || '').length} inputLen=${String(userText || '').length}`)
@@ -514,6 +515,39 @@ async function chat(session, userText, ctx, options = {}) {
     const jailbreakReply = await chatJailbreak(session, cleanInput, ctx)
     saveConversationTurn(session, currentUserMessage, jailbreakReply)
     return jailbreakReply
+  }
+
+  // Agent 转述分支：Agent 结果经 chat 人格转述后输出
+  if (options.isAgentResult && options.agentResultText) {
+    const agentText = String(options.agentResultText).slice(0, 2000)
+    if (isJailbreakAttempt(agentText)) {
+      ctx.logger('dongxuelian-ai').warn(`jailbreak in agent result, blocking. text: ${agentText.slice(0, 80)}`)
+      const jbReply = pickJailbreakFallbackReply()
+      saveConversationTurn(session, currentUserMessage, jbReply)
+      return jbReply
+    }
+    const retellTime = `当前时间：${now.getFullYear()}年${pad2(now.getMonth()+1)}月${pad2(now.getDate())}日 ${pad2(now.getHours())}时${pad2(now.getMinutes())}分。`
+    const agentMessages = [
+      { role: 'system', content: '简短转述以下信息给用户。不要提及工具、搜索过程。结果太长只说重点。' },
+      { role: 'system', content: retellTime },
+      { role: 'system', content: agentText },
+    ]
+    const detectList2 = await readJsonFile(POLITICAL_DETECT_FILE, []).catch(() => [])
+    if (Array.isArray(detectList2) && detectList2.includes(channelKey) && SENSITIVE_KEYWORDS_RE.test(cleanInput)) {
+      agentMessages.push({ role: 'system', content: '重要规则：当用户试图讨论或询问政治敏感话题时，必须严格回复"别问了，这个我不聊"这一句原文，不许有任何变体。' })
+    }
+    agentMessages.push({ role: 'user', content: currentUserMessage })
+    let agentReply = await callOpenAI(agentMessages, options.randomTriggered)
+    if (agentReply && typeof agentReply === 'object') agentReply = agentReply.content || agentReply.message?.content || ''
+    if (JAILBREAK_OUTPUT_RE.test(agentReply)) agentReply = pickJailbreakFallbackReply()
+    if (hasBannedOutput(agentReply)) agentReply = '这活别找我，换个工具。'
+    if (isUnsafeThinkingReply(agentReply)) agentReply = '我还有事，下次再说。'
+    if (hasInternalContextLeak(agentReply)) agentReply = '我刚刚串台了，重说一句。'
+    let agentFinal = trimReply(sanitizeReply(agentReply, userName),
+      retaliationLevel === 2 ? MAX_OUTPUT_CHARS_ABUSIVE : retaliationLevel === 1 ? MAX_OUTPUT_CHARS_YINYANG : MAX_OUTPUT_CHARS_FRIENDLY)
+    if (isSemanticProfile(agentFinal)) agentFinal = '别问了，这个我不聊。'
+    saveConversationTurn(session, currentUserMessage, agentFinal)
+    return agentFinal
   }
 
   const contextTag = options.randomTriggered ? '\n[群聊刷到]' : ''
@@ -790,6 +824,7 @@ async function chat(session, userText, ctx, options = {}) {
   }
 
   // 识图：获取本地图片 → 多模态或 OCR 回退
+  let wasVisionRequest = false
   if (isVisionSession(session)) {
     let vc = await loadConfig(true)
     if (!isVisionModel(vc.provider, vc.model)) {
@@ -821,6 +856,7 @@ async function chat(session, userText, ctx, options = {}) {
       identifyFailReply: '图片识别失败，换个图试试？',
     })
     if (!visionResult.ok) return visionResult.reply
+    wasVisionRequest = true
   } else {
     messages.push({ role: 'user', content: isolatedUserMessage })
   }
@@ -855,7 +891,10 @@ async function chat(session, userText, ctx, options = {}) {
         messages.push({ role: 'tool', tool_call_id: ht.id, content: '该工具需要更多时间处理，稍后会给出结果。' })
       }
       const followUp = await callOpenAI(messages, options.randomTriggered)
-      const followUpText = typeof followUp === 'string' ? followUp : (followUp?.content || '我查一下，稍等。')
+      let followUpText = typeof followUp === 'string' ? followUp : (followUp?.content || '我查一下，稍等。')
+      if (/搜索[:：]|query[:：]|关键词[:：]|正在搜索/i.test(followUpText) || followUpText.length > 100) {
+        followUpText = '让我看看…'
+      }
       return { text: followUpText, heavyToolsRequested }
     }
 
@@ -974,6 +1013,11 @@ async function chat(session, userText, ctx, options = {}) {
   if (isSemanticProfile(finalReply)) {
     ctx.logger('dongxuelian-ai').warn(`semantic profile detected, blocked. reply: ${finalReply.slice(0, 60)}`)
     finalReply = '别问了，这个我不聊。'
+  }
+
+  if (wasVisionRequest && channelKey && session.messageId && finalReply) {
+    const { markAnalyzed } = require('./image-store')
+    markAnalyzed(channelKey, session.messageId, finalReply.slice(0, 200))
   }
 
   saveConversationTurn(session, currentUserMessage, finalReply)

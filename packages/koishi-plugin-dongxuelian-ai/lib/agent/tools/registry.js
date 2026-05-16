@@ -22,11 +22,13 @@ const sendFileToUserTool = require('./send-file-to-user')
 const getTokenUsageTool = require('./get-token-usage')
 const setUserTimezoneTool = require('./set-user-timezone')
 const queryLogsTool = require('./query-logs')
+const readImageUrlsTool = require('./read-image-urls')
+const analyzeImageTool = require('./analyze-image')
 const planTools = require('../plan/plan-tools')
 const memoryTools = require('./memory-tools')
 const { getAgentConfig } = require('../config')
 
-const tools = [getTimeTool, calculatorTool, webSearchTool, readAgentSkillTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool, ...planTools.tools, ...memoryTools.tools]
+const tools = [getTimeTool, calculatorTool, webSearchTool, readAgentSkillTool, readFileTool, listFilesTool, findFilesTool, writeFileTool, editFileTool, shellTool, browserActionTool, appendFileTool, grepSearchTool, executeJavascriptTool, sendFileToUserTool, getTokenUsageTool, setUserTimezoneTool, queryLogsTool, readImageUrlsTool, analyzeImageTool, ...planTools.tools, ...memoryTools.tools]
 
 const TOOL_TIMEOUT_MS = 90000
 

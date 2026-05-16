@@ -176,10 +176,10 @@ function getWorkspaceSemanticCandidates(text = '', roots = []) {
 
 function formatWorkspaceContext(candidates = [], roots = []) {
   const lines = [
-    '【Dashboard Agent 工作区】',
-    '当前是 Dashboard/Agent Console 渠道：可在允许根目录内读取和修改文件；write_file/edit_file/append_file/execute_shell/browser_action 等危险工具仍必须遵守审批与 Shell Guard。',
+    '【控制台工作区-内部参考】',
+    '当前是控制台渠道：可在允许根目录内读取和修改文件；危险工具（写入/删除/Shell/浏览器）需遵守安全策略。',
     '处理本地文件请求时，先用 list_files/find_files/grep_search/read_file 定位和核对内容，再下结论；不要只按用户原词做字面搜索。',
-    '常见语义映射：dashboard/后台 -> packages/koishi-plugin-dashboard；bot前端/前端 agent -> packages/agent-console 与 Dashboard 的 AgentPanel.vue；工具权限/skill索引 -> packages/koishi-plugin-dongxuelian-ai/lib/agent。',
+    '常见语义映射：dashboard/后台 -> packages/koishi-plugin-dashboard；前端 -> packages/agent-console 与 Dashboard 的 AgentPanel.vue；工具权限/skill索引 -> packages/koishi-plugin-dongxuelian-ai/lib/agent。',
   ]
   if (roots.length) {
     lines.push('允许根目录：')
