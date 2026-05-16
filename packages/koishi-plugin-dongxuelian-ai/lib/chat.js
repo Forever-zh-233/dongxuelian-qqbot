@@ -517,7 +517,7 @@ async function chat(session, userText, ctx, options = {}) {
     return jailbreakReply
   }
 
-  // Agent 转述分支：Agent 结果经 chat 人格转述后输出
+  // Agent 结果注入：Agent 结果作为上下文，走正常 chat 流程（1 次 AI 调用）
   if (options.isAgentResult && options.agentResultText) {
     const agentText = String(options.agentResultText).slice(0, 2000)
     if (isJailbreakAttempt(agentText)) {
@@ -526,11 +526,10 @@ async function chat(session, userText, ctx, options = {}) {
       saveConversationTurn(session, currentUserMessage, jbReply)
       return jbReply
     }
-    const retellTime = `当前时间：${now.getFullYear()}年${pad2(now.getMonth()+1)}月${pad2(now.getDate())}日 ${pad2(now.getHours())}时${pad2(now.getMinutes())}分。`
     const agentMessages = [
-      { role: 'system', content: '简短转述以下信息给用户。不要提及工具、搜索过程。结果太长只说重点。' },
-      { role: 'system', content: retellTime },
-      { role: 'system', content: agentText },
+      { role: 'system', content: systemPrompt },
+      { role: 'system', content: dynamicTimePrompt },
+      { role: 'system', content: `以下是工具查到的信息，用你的风格简短告诉用户结果，不要提及工具或搜索过程：\n${agentText}` },
     ]
     const detectList2 = await readJsonFile(POLITICAL_DETECT_FILE, []).catch(() => [])
     if (Array.isArray(detectList2) && detectList2.includes(channelKey) && SENSITIVE_KEYWORDS_RE.test(cleanInput)) {

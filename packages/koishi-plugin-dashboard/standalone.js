@@ -3806,7 +3806,7 @@ const server = http.createServer(async (req, res) => {
           }),
         })
         if (result && result.reply && !(result.pendingId)) {
-          require(path.join(AI_LIB, 'agent', 'agent-chat-bridge')).recordAgentChatResult({
+          require(path.join(AI_LIB, 'agent-chat-bridge')).recordAgentChatResult({
             session: null,
             userMessage: message,
             userName: String(data.userName || 'Dashboard'),

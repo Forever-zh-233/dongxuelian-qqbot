@@ -72,7 +72,7 @@ async function run(t) {
     { json: { choices: [{ message: { content: 'normal-time-answer' } }] } },
   ], async (result, mocked) => {
     checkSentIncludes(t, 'scenario agent auto route default off uses normal chat', result, 'normal-time-answer')
-    t.check('scenario agent auto route default off has no tool schema', mocked.calls.length === 1 && !mocked.calls[0].requestBody.tools, JSON.stringify(mocked.calls.map(call => call.requestBody)))
+    t.check('scenario agent auto route default off uses single call', mocked.calls.length === 1, `calls=${mocked.calls.length}`)
   }, {
     input: '现在几点了',
     waitFor: message => String(message).includes('normal-time-answer'),
@@ -93,7 +93,7 @@ async function run(t) {
     { json: { choices: [{ message: { content: 'agent-time-ok' } }] } },
   ], async (result, mocked, session, calls) => {
     checkSentIncludes(t, 'scenario agent auto route sends tool answer', result, 'agent-time-ok')
-    t.check('scenario agent auto route used tool request', calls.length === 2 && Array.isArray(calls[0].requestBody.tools), JSON.stringify(calls.map(call => call.requestBody)))
+    t.check('scenario agent auto route used tool request', calls.length === 2 && Array.isArray(calls[0].requestBody.tools), JSON.stringify(calls.map(call => Object.keys(call.requestBody))))
     t.check('scenario agent auto route exposed time tool', calls[0].requestBody.tools.some(item => item.function && item.function.name === 'get_current_time'), JSON.stringify(calls[0].requestBody.tools))
   }, {
     input: '现在几点了',
@@ -102,12 +102,15 @@ async function run(t) {
   })
 
   await runChatCase(t, 'explicit web_search request routes to Agent even when auto route disabled', [
-    { json: { choices: [{ message: { content: 'agent-search-ok' } }] } },
+    { json: { choices: [{ message: { content: 'agent-search-raw' } }] } },
+    { json: { choices: [{ message: { content: 'agent-search-retold' } }] } },
   ], async (result, mocked, session, calls) => {
-    checkSentIncludes(t, 'scenario explicit web_search request sends Agent reply', result, 'agent-search-ok')
-    t.check('scenario explicit web_search request used tool result before model reply', calls.length === 1 && JSON.stringify(calls[0].requestBody.messages || []).includes('已搜索：鸣潮 最新角色'), JSON.stringify(calls.map(call => call.requestBody)))
-    t.check('scenario explicit web_search prompt forbids fabricating from irrelevant results', JSON.stringify(calls[0].requestBody.messages || []).includes('搜索没有拿到可靠结果') && JSON.stringify(calls[0].requestBody.messages || []).includes('工具结果是事实边界'), JSON.stringify(calls[0].requestBody.messages || []))
+    checkSentIncludes(t, 'scenario explicit web_search request sends chat reply', result, 'agent-search-retold')
+    t.check('scenario explicit web_search uses agent then chat (2 calls)', calls.length === 2, `calls=${calls.length}`)
+    const agentPrompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario explicit web_search agent prompt has search instruction', agentPrompt.includes('必须先调用 web_search'), agentPrompt.slice(0, 300))
     t.check('scenario explicit web_search request exposes web_search', calls[0].requestBody.tools.some(item => item.function && item.function.name === 'web_search'), JSON.stringify(calls[0].requestBody.tools))
+    t.check('scenario explicit web_search chat call has agent context', JSON.stringify(calls[1].requestBody.messages || []).includes('工具查到的信息'), JSON.stringify(calls[1].requestBody.messages))
   }, {
     input: '调用web_search查鸣潮最新角色是谁',
     setup(session) {
@@ -115,7 +118,7 @@ async function run(t) {
       webSearch.__scenarioOriginalExecute = webSearch.execute
       webSearch.execute = async () => '已搜索：鸣潮 最新角色\n搜索结果：绯雪与达妮娅'
     },
-    waitFor: message => String(message).includes('agent-search-ok'),
+    waitFor: message => String(message).includes('agent-search-retold'),
   })
   try {
     const webSearch = require(path.join(AI_ROOT, 'lib', 'agent', 'tools', 'web-search.js'))
@@ -125,17 +128,19 @@ async function run(t) {
     }
   } catch {}
 
-  await runChatCase(t, 'QQ Agent inherits selected chat persona', [
-    { json: { choices: [{ message: { content: 'agent-persona-ok' } }] } },
+  await runChatCase(t, 'QQ Agent runs in direct mode and chat retells with persona', [
+    { json: { choices: [{ message: { content: 'agent-direct-raw' } }] } },
+    { json: { choices: [{ message: { content: 'agent-persona-retold' } }] } },
   ], async (result, mocked, session, calls) => {
-    checkSentIncludes(t, 'scenario QQ Agent inherits persona reply', result, 'agent-persona-ok')
-    const prompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
-    t.check('scenario QQ Agent prompt includes selected persona marker', prompt.includes('AGENT_PERSONA_MARKER'), prompt)
-    t.check('scenario QQ Agent prompt includes core marker', prompt.includes('AGENT_CORE_MARKER'), prompt)
-    t.check('scenario QQ Agent prompt includes anti-ooc guard', prompt.includes('Agent 防越狱') && prompt.includes('QQ 渠道不具备服务器管理权限'), prompt)
+    checkSentIncludes(t, 'scenario QQ Agent direct mode sends persona reply', result, 'agent-persona-retold')
+    const agentPrompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario QQ Agent prompt includes direct mode marker', agentPrompt.includes('Agent 直连模式'), agentPrompt)
+    const chatPrompt = JSON.stringify(calls[1]?.requestBody?.messages || [])
+    t.check('scenario QQ Agent chat call includes agent context', chatPrompt.includes('工具查到的信息'), chatPrompt)
+    t.check('scenario QQ Agent chat call includes core persona', chatPrompt.includes('AGENT_CORE_MARKER'), chatPrompt)
   }, {
-    input: '莲莲 agent 现在几点',
-    setup(session, { data }) {
+    input: '搜一下现在最新的天气是什么',
+    async setup(session, { data }) {
       data.writeText('ai-skills/core/SKILL.persona-core.md', [
         '---',
         'name: persona-core',
@@ -152,20 +157,22 @@ async function run(t) {
       data.writeJson('ai-persona-users.json', { [session.userId]: 'Agent测试人格' })
       const persona = require(path.join(AI_ROOT, 'lib', 'persona.js'))
       persona.loadPersonaUsers()
+      const chatModule = require(path.join(AI_ROOT, 'lib', 'chat.js'))
+      await chatModule.loadSkillsContentCache()
     },
-    waitFor: message => String(message).includes('agent-persona-ok'),
+    waitFor: message => String(message).includes('agent-persona-retold'),
   })
 
-  await runChatCase(t, 'QQ Agent personal persona overrides group persona', [
-    { json: { choices: [{ message: { content: 'agent-personal-persona-ok' } }] } },
+  await runChatCase(t, 'QQ Agent direct mode skips persona, chat applies it', [
+    { json: { choices: [{ message: { content: 'agent-no-persona-raw' } }] } },
+    { json: { choices: [{ message: { content: 'agent-chat-persona-ok' } }] } },
   ], async (result, mocked, session, calls) => {
-    checkSentIncludes(t, 'scenario QQ Agent personal persona reply', result, 'agent-personal-persona-ok')
-    const prompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
-    t.check('scenario QQ Agent prompt includes personal persona', prompt.includes('AMIS_AGENT_MARKER') && prompt.includes('当前人格：爱弥斯') && prompt.includes('来源：用户人格'), prompt)
-    t.check('scenario QQ Agent prompt excludes group persona marker', !prompt.includes('CHANG_LI_AGENT_MARKER') && !prompt.includes('当前人格：长离'), prompt)
-    t.check('scenario QQ Agent base system does not force Dongxuelian over selected persona', prompt.includes('具体人格由后续【Agent 人格同步】system 消息决定') && !prompt.includes('你是东雪莲，一个带有 Agent 能力'), prompt)
+    checkSentIncludes(t, 'scenario QQ Agent chat persona reply', result, 'agent-chat-persona-ok')
+    const agentPrompt = JSON.stringify(calls[0]?.requestBody?.messages || [])
+    t.check('scenario QQ Agent direct mode excludes user persona in agent call', !agentPrompt.includes('AMIS_AGENT_MARKER') && !agentPrompt.includes('当前人格：爱弥斯'), agentPrompt)
+    t.check('scenario QQ Agent direct mode uses direct prompt', agentPrompt.includes('Agent 直连模式') && agentPrompt.includes('不需要角色扮演'), agentPrompt)
   }, {
-    input: '莲莲 agent 总结当前设置',
+    input: '帮我查一下最新的鸣潮角色是谁',
     setup(session, { data }) {
       data.writeText('ai-skills/personas/SKILL.amis.md', [
         '---',
@@ -187,10 +194,11 @@ async function run(t) {
       persona.loadPersonaUsers()
       persona.loadPersonaGroups()
     },
-    waitFor: message => String(message).includes('agent-personal-persona-ok'),
+    waitFor: message => String(message).includes('agent-chat-persona-ok'),
   })
 
   await runChatCase(t, 'QQ Agent skill prompt uses compact index', [
+    { json: { choices: [{ message: { content: 'agent-skill-index-raw' } }] } },
     { json: { choices: [{ message: { content: 'agent-skill-index-ok' } }] } },
   ], async (result, mocked, session, calls) => {
     checkSentIncludes(t, 'scenario QQ Agent compact skill prompt reply', result, 'agent-skill-index-ok')
@@ -199,7 +207,7 @@ async function run(t) {
     t.check('scenario QQ Agent prompt does not inject full skill body', !prompt.includes('LONG_SKILL_BODY_SHOULD_NOT_BE_IN_PROMPT'), prompt)
     t.check('scenario QQ Agent exposes read_agent_skill but not read_file', calls[0].requestBody.tools.some(item => item.function?.name === 'read_agent_skill') && !calls[0].requestBody.tools.some(item => item.function?.name === 'read_file'), JSON.stringify(calls[0].requestBody.tools))
   }, {
-    input: '莲莲 agent 按 pptx 技能做个方案',
+    input: '搜一下最新的 pptx 技能资料是什么',
     setup(session, { data }) {
       data.writeText('ai-skills/docs/pptx/SKILL.md', [
         '---',

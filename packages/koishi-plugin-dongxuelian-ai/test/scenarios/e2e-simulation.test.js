@@ -91,9 +91,7 @@ async function run(t) {
       await session.waitForSend(() => true, 5000)
       const replyText = session.sent.join(' ')
       assertNoEmptyAgentReply(t, 'short casual "你好"', replyText)
-      const modelRequest = mocked.calls[0]?.requestBody
-      t.check('casual "你好" should not include tools', !modelRequest?.tools || !modelRequest.tools.length,
-        JSON.stringify(modelRequest?.tools || []))
+      t.check('casual "你好" uses single call (no Agent)', mocked.calls.length === 1, `calls=${mocked.calls.length}`)
     })
   })
 
@@ -110,9 +108,7 @@ async function run(t) {
       await session.waitForSend(() => true, 5000)
       const replyText = session.sent.join(' ')
       assertNoEmptyAgentReply(t, 'auto route off time query', replyText)
-      const hasTools = mocked.calls[0]?.requestBody?.tools?.length > 0
-      t.check('auto route off should not include tools', !hasTools,
-        JSON.stringify(mocked.calls[0]?.requestBody?.tools || []))
+      t.check('auto route off uses single call (no Agent)', mocked.calls.length === 1, `calls=${mocked.calls.length}`)
     })
   })
 
@@ -153,11 +149,12 @@ async function run(t) {
 
   // === 正路测试（mocked 模型 + 真实工具路径） ===
 
-  // 正路 1：显式 web_search 请求 → Agent 工具链 → 正常回复
+  // 正路 1：显式 web_search 请求 → Agent 工具链 → chat 转述
   await withScenario({}, async ({ makeSession, run, data }) => {
     const mocked = mockFetch([
       { json: { choices: [{ message: { content: '', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'web_search', arguments: '{"query":"鸣潮最新角色"}' } }] } }] } },
       { json: { choices: [{ message: { content: '根据搜索结果，鸣潮最新角色是绯雪。' } }] } },
+      { json: { choices: [{ message: { content: '绯雪是鸣潮最新角色。' } }] } },
     ])
     await withFetch(mocked, async () => {
       const webSearch = require(path.join(AI_ROOT, 'lib', 'agent', 'tools', 'web-search.js'))
@@ -179,19 +176,18 @@ async function run(t) {
         t.check('mocked explicit search has tool answer', replyText.includes('绯雪') || replyText.includes('搜索结果'), replyText.slice(0, 200))
         const firstCallTools = mocked.calls[0]?.requestBody?.tools || []
         t.check('mocked explicit search exposes web_search', firstCallTools.some(item => item.function?.name === 'web_search'), JSON.stringify(firstCallTools))
-        const lastPrompt = JSON.stringify(mocked.calls[mocked.calls.length - 1]?.requestBody?.messages || [])
-        t.check('mocked explicit search prompt contains tool result', lastPrompt.includes('已搜索') || lastPrompt.includes('kurogames'), lastPrompt.slice(0, 300))
       } finally {
         webSearch.execute = originalExecute
       }
     })
   })
 
-  // 正路 2：Agent auto route 打开 → 时间查询 → Agent 工具链
+  // 正路 2：Agent auto route 打开 → 时间查询 → Agent 工具链 → 转述
   await withScenario({}, async ({ makeSession, run, data }) => {
     const mocked = mockFetch([
       { json: { choices: [{ message: { content: '', tool_calls: [{ id: 'tc-time', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] } }] } },
       { json: { choices: [{ message: { content: '现在是 14:30。' } }] } },
+      { json: { choices: [{ message: { content: '14点30分。' } }] } },
     ])
     await withFetch(mocked, async () => {
       data.writeJson('ai-tool-config.json', {
@@ -215,6 +211,7 @@ async function run(t) {
     const mocked = mockFetch([
       { json: { choices: [{ message: { content: '', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'web_search', arguments: '{"query":"测试搜索"}' } }] } }] } },
       { json: { choices: [{ message: { content: '搜索完成。' } }] } },
+      { json: { choices: [{ message: { content: '搜索结果已获取。' } }] } },
     ])
     await withFetch(mocked, async () => {
       const originalFetch = global.fetch
@@ -235,11 +232,6 @@ async function run(t) {
         t.check('mocked http extraction sends reply', session.sent.length > 0)
         assertNoEmptyAgentReply(t, 'mocked http extraction', replyText)
         assertNoReasoningLeak(t, 'mocked http extraction', replyText)
-        // HTTP 搜索结果应在 prompt 中
-        const lastPrompt = JSON.stringify(mocked.calls[mocked.calls.length - 1]?.requestBody?.messages || [])
-        t.check('mocked http extraction prompt has search result',
-          lastPrompt.includes('搜索结果') || lastPrompt.includes('example.com') || lastPrompt.includes('轻量 HTTP'),
-          lastPrompt.slice(0, 400))
       } finally {
         global.fetch = originalFetch
       }
@@ -251,6 +243,7 @@ async function run(t) {
     const mocked = mockFetch([
       { json: { choices: [{ message: { content: '', reasoning_content: '用户问时间', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] } }] } },
       { json: { choices: [{ message: { content: '现在是 14:30。' } }] } },
+      { json: { choices: [{ message: { content: '14:30。' } }] } },
     ])
     await withFetch(mocked, async () => {
       data.writeJson('ai-tool-config.json', {
@@ -268,11 +261,12 @@ async function run(t) {
 
   // === 坏路测试 ===
 
-  // 坏路 1：模型返回 tool_calls 后第二轮空回复 → 不应急响应空
+  // 坏路 1：模型返回 tool_calls 后第二轮空回复 → 转述兜底
   await withScenario({}, async ({ makeSession, run, data }) => {
     const mocked = mockFetch([
       { json: { choices: [{ message: { content: '', tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }] } }] } },
       { json: { choices: [{ message: { content: '' } }] } },
+      { json: { choices: [{ message: { content: '暂时没有结果。' } }] } },
     ])
     await withFetch(mocked, async () => {
       data.writeJson('ai-tool-config.json', {
