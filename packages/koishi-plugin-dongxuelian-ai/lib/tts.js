@@ -15,7 +15,7 @@ const DEFAULT_VOICE = '冰糖'
 const DEFAULT_STYLE = '活泼可爱'
 const MAX_TTS_TEXT_LENGTH = 300
 const CHANNEL_COOLDOWN_MS = 5 * 60 * 1000
-const RANDOM_VOICE_RATE = 0.05
+const RANDOM_VOICE_RATE = 0.001
 
 const BUILTIN_VOICES = ['冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean', 'mimo_default']
 

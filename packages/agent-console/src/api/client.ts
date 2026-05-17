@@ -94,4 +94,8 @@ export const api = {
   runCron: (id: string) => request<any>('/agent/crons/' + encodeURIComponent(id) + '/run', { method: 'POST', body: '{}' }, 90000),
   deleteCron: (id: string) => request<any>('/agent/crons/' + encodeURIComponent(id), { method: 'DELETE' }),
   pushLog: () => request<any>('/agent/push-log'),
+  ttsVoices: () => request<any>('/agent/tts/voices'),
+  ttsPreview: (text: string, voice: string, style: string) => request<any>('/agent/tts/preview', { method: 'POST', body: JSON.stringify({ text, voice, style }) }, 30000),
+  ttsClone: (personaName: string, audioBase64: string, mimeType: string) => request<any>('/agent/tts/clone', { method: 'POST', body: JSON.stringify({ personaName, audioBase64, mimeType }) }, 30000),
+  savePersonaVoice: (persona: string, voiceId: string, voiceStyle: string) => request<any>('/agent/persona/voice', { method: 'PUT', body: JSON.stringify({ personaName: persona, voiceId, voiceStyle }) }),
 }

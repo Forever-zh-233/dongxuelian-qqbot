@@ -123,7 +123,9 @@ export default {
       if (res.ok && res.data) {
         usageDays.value = res.data.days || []
         usageProviders.value = (res.data.providers || []).map(function(p) {
-          return { key: p, label: p, color: providerColors[p] || '#888' }
+          const key = typeof p === 'string' ? p : p.key
+          const label = typeof p === 'string' ? p : (p.label || p.key)
+          return { key, label, color: providerColors[key] || '#888' }
         })
         let max = 1
         let total = 0

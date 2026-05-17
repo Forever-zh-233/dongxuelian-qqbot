@@ -601,7 +601,16 @@ async function handleCommand(session, ctx, state) {
     const { synthesizeSpeech, sendVoiceMessage, resolvePersonaVoice } = require('./tts')
     const resolved = resolvePersona(channelKey, currentUserId)
     const voiceOpts = resolvePersonaVoice(resolved.name)
-    const phrases = ['哼，你好烦啊', '今天天气不错呢', '你在干嘛呀', '无聊死了', '哎呀别烦我啦']
+    const phrases = [
+      '哼，你好烦啊', '今天天气不错呢', '你在干嘛呀', '无聊死了', '哎呀别烦我啦',
+      '我好困啊，让我再睡一会儿', '你是不是又在摸鱼', '嘿嘿，被我发现了吧',
+      '我饿了，想吃冰淇淋', '你今天有没有好好吃饭呀', '哇，好开心呀',
+      '讨厌，不要一直叫我', '我在想一个很重要的事情', '你猜我在想什么',
+      '啊，突然好想出去玩', '今天也要加油哦', '你有没有想我呀',
+      '我觉得你应该休息一下了', '嗯哼，我才不会告诉你呢', '好无聊啊，陪我聊天嘛',
+      '你知道吗，我刚才做了一个梦', '哎，时间过得好快啊', '我最喜欢这个时候了',
+      '你是不是偷偷在看我', '今天的心情是晴天', '我要去冒险了，你要一起来吗',
+    ]
     const text = phrases[Math.floor(Math.random() * phrases.length)]
     const buf = await synthesizeSpeech(text, voiceOpts)
     if (buf) {

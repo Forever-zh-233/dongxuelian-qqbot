@@ -3511,6 +3511,116 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // === TTS 音色管理 API ===
+  if (pathname === '/dashboard/api/agent/tts/voices' && req.method === 'GET') {
+    if (!requireAdmin(req, res)) return
+    try {
+      const tts = require(path.join(AI_LIB, 'tts'))
+      const { getAvailablePersonals, parsePersonaFrontmatter, loadPersonalSkill } = require(path.join(AI_LIB, 'persona'))
+      const personas = getAvailablePersonals({ userFacing: true })
+      const voiceConfigs = personas.map(p => {
+        const content = loadPersonalSkill(p.name)
+        const meta = content ? parsePersonaFrontmatter(content) : {}
+        return { name: p.name, voice: meta.voice_id || meta.voice || '', style: meta.voice_style || '', hasSample: false }
+      })
+      const voicesDir = path.join(DATA_DIR, 'ai-voices')
+      try {
+        const files = fs.readdirSync(voicesDir)
+        for (const vc of voiceConfigs) {
+          const match = files.find(f => f.startsWith(vc.name + '.'))
+          if (match) vc.hasSample = true
+        }
+      } catch {}
+      return json(res, { ok: true, builtin: tts.BUILTIN_VOICES, personas: voiceConfigs })
+    } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+  }
+
+  if (pathname === '/dashboard/api/agent/tts/clone' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const { personaName, audioBase64, mimeType } = data
+        if (!personaName || !audioBase64) return json(res, { ok: false, message: '缺少 personaName 或 audioBase64' }, 400)
+        const buf = Buffer.from(audioBase64, 'base64')
+        if (buf.length > 10 * 1024 * 1024) return json(res, { ok: false, message: '音频文件超过 10MB 限制' }, 400)
+        if (buf.length < 1024) return json(res, { ok: false, message: '音频文件过小，可能无效' }, 400)
+        const ext = (mimeType || '').includes('wav') ? 'wav' : (mimeType || '').includes('ogg') ? 'ogg' : (mimeType || '').includes('flac') ? 'flac' : 'mp3'
+        const voicesDir = path.join(DATA_DIR, 'ai-voices')
+        fs.mkdirSync(voicesDir, { recursive: true })
+        const safeName = String(personaName).replace(/[^a-zA-Z0-9一-鿿._-]/g, '_').slice(0, 40)
+        const filePath = path.join(voicesDir, `${safeName}.${ext}`)
+        fs.writeFileSync(filePath, buf)
+        const tts = require(path.join(AI_LIB, 'tts'))
+        const dataUri = `data:${mimeType || 'audio/mpeg'};base64,${audioBase64}`
+        const testBuf = await tts.synthesizeSpeech('测试语音克隆', { voice: dataUri, style: '正常语气' })
+        if (!testBuf) {
+          try { fs.unlinkSync(filePath) } catch {}
+          return json(res, { ok: false, message: 'MiMo voiceclone 验证失败，请检查音频格式或 API key' }, 400)
+        }
+        return json(res, { ok: true, message: '音色克隆成功', file: `${safeName}.${ext}` })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/tts/preview' && req.method === 'POST') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const { text, voice, style } = data
+        if (!text) return json(res, { ok: false, message: '缺少 text' }, 400)
+        const tts = require(path.join(AI_LIB, 'tts'))
+        const buf = await tts.synthesizeSpeech(String(text).slice(0, 200), { voice: voice || '冰糖', style: style || '活泼可爱' })
+        if (!buf) return json(res, { ok: false, message: '语音合成失败，请检查 API key 或网络' }, 500)
+        return json(res, { ok: true, audio: buf.toString('base64'), format: 'wav' })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })
+    return
+  }
+
+  if (pathname === '/dashboard/api/agent/persona/voice' && req.method === 'PUT') {
+    if (!requireAdmin(req, res)) return
+    collectBody(req, res, async (body) => {
+      try {
+        const data = JSON.parse(body || '{}')
+        const { personaName, voiceId, voiceStyle } = data
+        if (!personaName) return json(res, { ok: false, message: '缺少 personaName' }, 400)
+        const personaModule = require(path.join(AI_LIB, 'persona'))
+        const content = personaModule.loadPersonalSkill(personaName)
+        if (!content) return json(res, { ok: false, message: '未找到人格：' + personaName }, 404)
+        let updated = content
+        if (/^---\n[\s\S]*?\n---/.test(updated)) {
+          updated = updated.replace(/^(---\n[\s\S]*?)(voice_id:[^\n]*\n)/m, '$1')
+          updated = updated.replace(/^(---\n[\s\S]*?)(voice_style:[^\n]*\n)/m, '$1')
+          updated = updated.replace(/^(---\n[\s\S]*?)(voice:[^\n]*\n)/m, '$1')
+          updated = updated.replace(/^---\n/, `---\nvoice_id: ${voiceId || '冰糖'}\nvoice_style: ${voiceStyle || '活泼可爱'}\n`)
+        } else {
+          updated = `---\nvoice_id: ${voiceId || '冰糖'}\nvoice_style: ${voiceStyle || '活泼可爱'}\n---\n${content}`
+        }
+        const searchDirs = ['personas', 'core', 'modes'].map(d => path.join(DATA_DIR, 'ai-skills', d))
+        let targetFile = null
+        for (const skillsDir of searchDirs) {
+          if (!fs.existsSync(skillsDir)) continue
+          const entries = fs.readdirSync(skillsDir)
+          for (const entry of entries) {
+            if (!/^SKILL(\.[^.]+)?\.md$/i.test(entry)) continue
+            const filePath = path.join(skillsDir, entry)
+            const fileContent = fs.readFileSync(filePath, 'utf8')
+            const meta = personaModule.parsePersonaFrontmatter(fileContent)
+            if (meta.name === personaName) { targetFile = filePath; break }
+          }
+          if (targetFile) break
+        }
+        if (!targetFile) return json(res, { ok: false, message: '未找到人格文件' }, 404)
+        fs.writeFileSync(targetFile, updated, 'utf8')
+        return json(res, { ok: true, message: '音色配置已更新' })
+      } catch (e) { return json(res, { ok: false, message: e.message }, 500) }
+    })
+    return
+  }
+
   if (pathname === '/dashboard/api/agent/stats' && req.method === 'GET') {
     if (!requireAdmin(req, res)) return
     try {

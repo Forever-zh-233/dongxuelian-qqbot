@@ -558,6 +558,134 @@ function SkillsPage({ data, setConfig, refresh }: any) {
   )
 }
 
+function VoicePanel({ personas, currentPersona }: { personas: any[]; currentPersona: string }) {
+  const [voices, setVoices] = useState<string[]>([])
+  const [personaVoices, setPersonaVoices] = useState<Record<string, { voiceId: string; voiceStyle: string }>>({})
+  const [selectedPersona, setSelectedPersona] = useState(currentPersona || '')
+  const [voice, setVoice] = useState('')
+  const [style, setStyle] = useState('')
+  const [previewText, setPreviewText] = useState('')
+  const [audioSrc, setAudioSrc] = useState('')
+  const [cloneFile, setCloneFile] = useState<File | null>(null)
+  const [cloneStatus, setCloneStatus] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    api.ttsVoices().then(res => {
+      if (res.ok) {
+        setVoices(res.data?.builtin || [])
+        const pvMap: Record<string, { voiceId: string; voiceStyle: string }> = {}
+        for (const p of (res.data?.personas || [])) {
+          if (p.name) pvMap[p.name] = { voiceId: p.voice || '', voiceStyle: p.style || '' }
+        }
+        setPersonaVoices(pvMap)
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    const pv = personaVoices[selectedPersona]
+    setVoice(pv?.voiceId || '')
+    setStyle(pv?.voiceStyle || '')
+  }, [selectedPersona, personaVoices])
+
+  async function saveVoice() {
+    if (!selectedPersona) { setMessage('请先选择人格'); return }
+    setLoading(true)
+    const res = await api.savePersonaVoice(selectedPersona, voice, style)
+    setLoading(false)
+    if (res.ok) {
+      setMessage('语音配置已保存')
+      setPersonaVoices(prev => ({ ...prev, [selectedPersona]: { voiceId: voice, voiceStyle: style } }))
+    } else {
+      setMessage(res.message || res.data?.message || '保存失败')
+    }
+  }
+
+  async function preview() {
+    const text = previewText.trim() || '你好，这是一段语音测试。'
+    setLoading(true)
+    setAudioSrc('')
+    const res = await api.ttsPreview(text, voice || '冰糖', style || '活泼可爱')
+    setLoading(false)
+    if (res.ok && res.data?.audio) {
+      setAudioSrc('data:audio/wav;base64,' + res.data.audio)
+    } else {
+      setMessage(res.message || res.data?.message || '试听失败')
+    }
+  }
+
+  async function cloneVoice() {
+    if (!cloneFile) { setMessage('请先选择音频文件'); return }
+    if (!selectedPersona) { setMessage('请先选择人格'); return }
+    setCloneStatus('上传中...')
+    setLoading(true)
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(',')[1]
+      const mimeType = cloneFile.type || 'audio/mpeg'
+      const res = await api.ttsClone(selectedPersona, base64, mimeType)
+      setLoading(false)
+      if (res.ok) {
+        setCloneStatus('克隆成功')
+        setMessage('音色克隆完成')
+      } else {
+        setCloneStatus('克隆失败')
+        setMessage(res.message || res.data?.message || '克隆失败')
+      }
+    }
+    reader.onerror = () => { setLoading(false); setCloneStatus('读取失败'); setMessage('文件读取失败') }
+    reader.readAsDataURL(cloneFile)
+  }
+
+  const personaOptions = (personas || []).filter(p => p.name)
+
+  return (
+    <div className="voice-panel">
+      <h3>语音合成配置</h3>
+      <div className="voice-form">
+        <label className="voice-field">
+          <span>人格</span>
+          <select value={selectedPersona} onChange={e => setSelectedPersona(e.target.value)}>
+            <option value="">-- 选择人格 --</option>
+            {personaOptions.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="voice-field">
+          <span>音色</span>
+          <select value={voice} onChange={e => setVoice(e.target.value)}>
+            <option value="">默认（冰糖）</option>
+            {voices.map(v => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </label>
+        <label className="voice-field">
+          <span>说话风格</span>
+          <input type="text" value={style} onChange={e => setStyle(e.target.value)} placeholder="活泼可爱、温柔知性..." />
+        </label>
+        <div className="voice-actions">
+          <button onClick={saveVoice} disabled={loading || !selectedPersona}>保存配置</button>
+          <button className="secondary" onClick={preview} disabled={loading}>试听</button>
+        </div>
+      </div>
+      <div className="voice-preview-row">
+        <input type="text" value={previewText} onChange={e => setPreviewText(e.target.value)} placeholder="输入试听文本（默认：你好，这是一段语音测试。）" />
+        {audioSrc && <audio controls src={audioSrc} />}
+      </div>
+      <div className="voice-clone-box">
+        <h3>音色克隆</h3>
+        <p className="muted">上传音频样本（MP3/WAV/OGG/M4A，30s 以内，10MB 以内）</p>
+        <div className="voice-clone-row">
+          <input type="file" accept=".mp3,.wav,.ogg,.m4a" onChange={e => { setCloneFile(e.target.files?.[0] || null); setCloneStatus('') }} />
+          <button className="secondary" onClick={cloneVoice} disabled={loading || !cloneFile}>测试克隆</button>
+          {cloneStatus && <span className={cloneStatus.includes('成功') ? 'tag ok' : 'tag warn'}>{cloneStatus}</span>}
+        </div>
+      </div>
+      {message && <span className="form-error">{message}</span>}
+    </div>
+  )
+}
+
 function PersonasPage({ personas, persona, setPersona, refresh }: { personas: any[]; persona: any; setPersona: (value: any) => void; refresh: () => void }) {
   const current = persona?.dashboardPersona || ''
   const inherit = persona?.qqInheritChatPersona !== false
@@ -602,6 +730,7 @@ function PersonasPage({ personas, persona, setPersona, refresh }: { personas: an
           </article>
         ))}
       </div>
+      <VoicePanel personas={personas} currentPersona={current} />
     </section>
   )
 }

@@ -368,13 +368,13 @@ export default {
       } finally { restartingNapcat.value = false }
     }
 
-    async function toggleMaintenance(targetValue = maintenanceOn.value) {
-      maintenanceOn.value = targetValue
+    async function toggleMaintenance() {
+      const targetValue = maintenanceOn.value
       maintLoading.value = true
       const res = await setMaintenance(targetValue)
       if (res.code === 'ADMIN_REQUIRED') {
         maintenanceOn.value = !targetValue
-        if (showAdminDialog) showAdminDialog('维护模式需要管理员密码', () => toggleMaintenance(targetValue))
+        if (showAdminDialog) showAdminDialog('维护模式需要管理员密码', () => { maintenanceOn.value = targetValue; toggleMaintenance() })
         maintLoading.value = false
         return
       }
