@@ -97,6 +97,7 @@
         <div style="font-size:13px;color:var(--text2);margin-bottom:4px">音色</div>
         <select v-model="voiceId" style="width:100%">
           <option value="">默认（冰糖）</option>
+          <option value="__cloned__" v-if="personaVoiceMap[voicePersona]?.hasSample">克隆音色</option>
           <option v-for="v in voiceList" :key="v" :value="v">{{ v }}</option>
         </select>
       </div>
@@ -354,7 +355,7 @@ export default {
         voiceList.value = res.data?.builtin || []
         const pvMap = {}
         for (const p of (res.data?.personas || [])) {
-          if (p.name) pvMap[p.name] = { voiceId: p.voice || '', voiceStyle: p.style || '' }
+          if (p.name) pvMap[p.name] = { voiceId: p.voice || '', voiceStyle: p.style || '', hasSample: !!p.hasSample }
         }
         personaVoiceMap.value = pvMap
       }
@@ -408,6 +409,8 @@ export default {
         const res = await ttsClone(voicePersona.value, base64, mimeType)
         if (res.ok) {
           cloneStatus.value = '克隆成功'
+          voiceId.value = '__cloned__'
+          personaVoiceMap.value = { ...personaVoiceMap.value, [voicePersona.value]: { voiceId: '__cloned__', voiceStyle: voiceStyle.value, hasSample: true } }
         } else {
           cloneStatus.value = '克隆失败'
           voiceMsg.value = { type: 'err', text: res.data?.message || '克隆失败' }
