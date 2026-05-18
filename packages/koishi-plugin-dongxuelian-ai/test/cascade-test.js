@@ -287,6 +287,14 @@ function gitCheckIgnored(relativePath) {
   return result.status === 0
 }
 
+function pathIsSymlink(relativePath) {
+  try {
+    return fs.lstatSync(path.join(ROOT, relativePath)).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
 function makeLoggerStore() {
   const logs = []
   return {
@@ -430,6 +438,7 @@ async function main() {
   check('npm check includes AI index syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/index.js'))
   check('npm check includes AI chat syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/chat.js'))
   check('npm check includes AI jailbreak ruleset syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/rulesets/jailbreak.js'))
+  check('npm check includes AI skill seed sync syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/skill-seeds.js'))
   check('npm check includes AI runtime config syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/runtime-config.js'))
   check('npm check includes AI reply syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/reply.js'))
   check('npm check includes AI reply guard syntax', rootPkg.scripts && rootPkg.scripts.check && rootPkg.scripts.check.includes('node -c packages/koishi-plugin-dongxuelian-ai/lib/reply-guard.js'))
@@ -490,6 +499,7 @@ async function main() {
   section('2. module loading and exports')
   const modPaths = {
     constants: path.join(LIB, 'constants'),
+    skillSeeds: path.join(LIB, 'skill-seeds'),
     utils: path.join(LIB, 'utils'),
     persona: path.join(LIB, 'persona'),
     api: path.join(LIB, 'api'),
@@ -589,6 +599,9 @@ async function main() {
   const index = modules.index
 
   const expectedExports = {
+    skillSeeds: [
+      'ensureRuntimeSkillSeeds', 'resetRuntimeSkillSeedSyncForTest',
+    ],
     utils: [
       'splitSentences', 'sanitizeUserName', 'sanitizeUserInput', 'isJailbreakAttempt',
       'isHostileInput', 'isRareProvocation', 'isWideRareProvocation', 'getSenderUserId', 'hasAdminPermission',
@@ -850,6 +863,7 @@ async function main() {
     path.join(LIB, 'persona.js'),
     path.join(LIB, 'message-reader.js'),
     path.join(LIB, 'chat.js'),
+    path.join(LIB, 'skill-seeds.js'),
     path.join(LIB, 'agent-chat-bridge.js'),
     path.join(LIB, 'rulesets', 'jailbreak.js'),
     path.join(LIB, 'runtime-config.js'),
@@ -1781,13 +1795,14 @@ async function main() {
   ]) {
     check(`gitignore pattern present: ${pattern}`, gitignore.includes(pattern))
   }
+  const packageDataSealed = pathIsSymlink('packages/koishi-plugin-dongxuelian-ai/data')
   const ignoredKey = gitCheckIgnored('packages/koishi-plugin-dongxuelian-ai/data/ai-openai-key.txt')
   if (ignoredKey === null) skip('git check-ignore unavailable')
-  else check('git ignores package key text file', ignoredKey)
+  else check('git ignores package key text file or package data is sealed', ignoredKey || packageDataSealed)
   const ignoredProfile = gitCheckIgnored('packages/koishi-plugin-dongxuelian-ai/data/user-profiles/group/user.json')
-  if (ignoredProfile !== null) check('git ignores package user profiles', ignoredProfile)
+  if (ignoredProfile !== null) check('git ignores package user profiles or package data is sealed', ignoredProfile || packageDataSealed)
   const ignoredSkill = gitCheckIgnored('packages/koishi-plugin-dongxuelian-ai/data/ai-skills/core/SKILL.persona-core.md')
-  if (ignoredSkill !== null) check('git does not ignore ai-skills resources', !ignoredSkill)
+  if (ignoredSkill !== null) check('git does not ignore ai-skills resources or package data is sealed', !ignoredSkill || packageDataSealed)
 
   section('14. deploy scripts')
   const scriptsDir = path.join(ROOT, 'scripts')
@@ -1910,15 +1925,29 @@ async function main() {
   check('setup.sh does not write package files directly into node_modules', !setupSrc.includes('cat > /root/koishi-app/node_modules'))
   check('setup.sh does not use patch preload', !setupSrc.includes('NODE_OPTIONS') && !setupSrc.includes('patch.js'))
   check('setup.sh starts koishi with local binary', setupSrc.includes('node "$KOISHI_DIR/node_modules/koishi/bin.js" start'))
+  check('setup.sh exports KOISHI_DIR before runtime start', setupSrc.includes('export KOISHI_DIR'))
+  check('setup.sh exports unified AI data dir before runtime start', setupSrc.includes('export DONGXUELIAN_AI_DATA_DIR="$DATA_DIR"'))
 
   section('15. cross-file regression guards')
   const indexSrc = read(path.join(LIB, 'index.js'))
   const apiSrc = read(path.join(LIB, 'api.js'))
+  const constantsSrc15 = read(path.join(LIB, 'constants.js'))
+  const skillSeedsSrc = read(path.join(LIB, 'skill-seeds.js'))
   const conversationSrc = read(path.join(LIB, 'conversation.js'))
   const chatSrc = read(path.join(LIB, 'chat.js'))
   const utilsSrc = read(path.join(LIB, 'utils.js'))
   const msgSrc = read(path.join(LIB, 'message-reader.js'))
   const dashboardStandaloneSrc = read(path.join(PKG_ROOT, 'koishi-plugin-dashboard', 'standalone.js'))
+  const groupNameAtSrc = read(path.join(PKG_ROOT, 'koishi-plugin-group-name-at', 'lib', 'index.js'))
+  const localVideoSenderSrc = read(path.join(PKG_ROOT, 'koishi-plugin-local-video-sender', 'lib', 'index.js'))
+  const startJsSrc = read(path.join(ROOT, 'start.js'))
+  const setupLocalSrc = read(path.join(ROOT, 'local-deployer', 'scripts', 'setup-local.cjs'))
+  const restartShSrc = read(path.join(ROOT, 'scripts', 'restart.sh'))
+  const restartBotSrc = read(path.join(ROOT, 'scripts', 'restart-bot.sh'))
+  const watchdogSrc = read(path.join(ROOT, 'scripts', 'watchdog.sh'))
+  const sealDataDirSrc = read(path.join(ROOT, 'scripts', 'seal-data-dir.sh'))
+  const deployFrontendBatSrc = read(path.join(ROOT, 'scripts', 'deploy-frontend.bat'))
+  const deployAndRestartBatSrc = read(path.join(ROOT, 'scripts', 'deploy-and-restart.bat'))
   const dailyRendererSrc = read(path.join(PKG_ROOT, 'koishi-plugin-daily-report', 'lib', 'html-renderer.js'))
   const dailyCollectorSrc = read(path.join(PKG_ROOT, 'koishi-plugin-daily-report', 'lib', 'data-collector.js'))
   const dailyAnalyzerSrc = read(path.join(PKG_ROOT, 'koishi-plugin-daily-report', 'lib', 'ai-analyzer.js'))
@@ -1942,6 +1971,35 @@ async function main() {
   check('index.js does not install content-based session.text fallback', !indexSrc.includes('prototype.text') || indexSrc.includes('.i18n('))
   check('index.js does not reference patch preload env', !indexSrc.includes('DONGXUELIAN_KOISHI_PATCH') && !indexSrc.includes('NODE_OPTIONS'))
   check('chat.js keeps block-scoped declarations', !/\bvar\b/.test(chatSrc))
+  check('runtime DATA_DIR default is not package data', !String(c.DATA_DIR).includes(path.join('packages', 'koishi-plugin-dongxuelian-ai', 'data')))
+  check('constants.js resolves DATA_DIR through runtime root fallback', constantsSrc15.includes('resolveRuntimeDataDir') && constantsSrc15.includes('process.cwd()') && constantsSrc15.includes('KOISHI_APP_DIR'))
+  check('constants.js has no package data fallback', !constantsSrc15.includes("path.join(__dirname, '../data')"))
+  check('skill seed sync copies builtin skills only when missing', skillSeedsSrc.includes('PACKAGE_SKILLS_SEED_DIR') && skillSeedsSrc.includes('copyMissingTree') && skillSeedsSrc.includes('if (fs.existsSync(dst)) continue'))
+  check('dashboard DATA_DIR has no package fallback', !dashboardStandaloneSrc.includes("path.join(PLUGIN_ROOT, '..', 'koishi-plugin-dongxuelian-ai', 'data')"))
+  check('dashboard listen host is configurable', dashboardStandaloneSrc.includes("const HOST = process.env.DASHBOARD_HOST || '127.0.0.1'") && dashboardStandaloneSrc.includes('server.listen(PORT, HOST'))
+  check('group-name-at has no package data fallback', !groupNameAtSrc.includes("path.join(__dirname, '../data')"))
+  check('local-video-sender has no cross-package data fallback', !localVideoSenderSrc.includes("'koishi-plugin-dongxuelian-ai', 'data'"))
+  check('start.js seeds unified runtime data env', startJsSrc.includes('process.env.KOISHI_DIR = process.cwd()') && startJsSrc.includes("process.env.DONGXUELIAN_AI_DATA_DIR = path.join(process.env.KOISHI_DIR, 'data')"))
+  check('local deploy helper seeds unified data env', setupLocalSrc.includes('set "KOISHI_DIR=%~dp0"') && setupLocalSrc.includes('set "DONGXUELIAN_AI_DATA_DIR=%~dp0data"') && setupLocalSrc.includes('node start.js'))
+  check('dashboard helper seeds unified data env', dashboardStandaloneSrc.includes('set "KOISHI_DIR=%~dp0"') && dashboardStandaloneSrc.includes('set "DONGXUELIAN_AI_DATA_DIR=%~dp0data"') && dashboardStandaloneSrc.includes('node start.js'))
+  check('local helpers avoid naked koishi start', !setupLocalSrc.includes('npx koishi start') && !dashboardStandaloneSrc.includes('call npm exec -- koishi start'))
+  check('dashboard button starts through start.js with data env', dashboardStandaloneSrc.includes("getLocalToolCommand('node')") && dashboardStandaloneSrc.includes("['start.js']") && dashboardStandaloneSrc.includes("DONGXUELIAN_AI_DATA_DIR: path.join(path.resolve(KOISHI_DIR), 'data')"))
+  check('dashboard remote deploy ships data seal script', dashboardStandaloneSrc.includes("scripts', 'seal-data-dir.sh'") && dashboardStandaloneSrc.includes("scpRemoteTarget(s, remoteJoin(scriptsDir, 'seal-data-dir.sh'))"))
+  check('dashboard remote deploy runs data seal before restart', dashboardStandaloneSrc.includes('KOISHI_DIR=${shellQuote(d)} DONGXUELIAN_AI_DATA_DIR=${shellQuote(dataDir)} sh') && dashboardStandaloneSrc.includes("remoteJoin(scriptsDir, 'seal-data-dir.sh')"))
+  check('dashboard remote deploy syncs ai-skills seed to root data', dashboardStandaloneSrc.includes('aiSkillsSeedDir') && dashboardStandaloneSrc.includes("remoteJoin(dataDir, 'ai-skills')") && dashboardStandaloneSrc.includes('cp -rn'))
+  check('legacy deploy scripts do not hardcode server ip', !deployFrontendBatSrc.includes('120.55.246.12') && !deployAndRestartBatSrc.includes('120.55.246.12'))
+  check('legacy deploy scripts accept dynamic server target', deployFrontendBatSrc.includes('DEPLOY_SERVER') && deployFrontendBatSrc.includes('%~1') && deployAndRestartBatSrc.includes('DEPLOY_SERVER') && deployAndRestartBatSrc.includes('%~1'))
+  check('restart.sh starts dashboard with unified data env', restartShSrc.includes('KOISHI_DIR="$APP_DIR"') && restartShSrc.includes('DONGXUELIAN_AI_DATA_DIR="$DATA_DIR"') && restartShSrc.includes('nohup node packages/koishi-plugin-dashboard/standalone.js'))
+  check('restart.sh exposes dashboard on configured host', restartShSrc.includes('DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"') && restartShSrc.includes('DASHBOARD_HOST="$DASHBOARD_HOST" DASHBOARD_PORT="$DASHBOARD_PORT"'))
+  check('restart.sh starts koishi with unified data env', restartShSrc.includes('KOISHI_DIR="$APP_DIR" DONGXUELIAN_AI_DATA_DIR="$DATA_DIR" nohup node "$APP_DIR/node_modules/koishi/bin.js" start'))
+  check('restart-bot exports KOISHI_DIR for koishi', restartBotSrc.includes('export KOISHI_DIR="$APP_DIR"'))
+  check('restart-bot starts dashboard with unified data env', restartBotSrc.includes('KOISHI_DIR="$APP_DIR"') && restartBotSrc.includes('DONGXUELIAN_AI_DATA_DIR="$DATA_DIR"') && restartBotSrc.includes('NODE_PATH="$NODE_MODULES"') && restartBotSrc.includes('nohup node standalone.js'))
+  check('restart-bot exposes dashboard on configured host', restartBotSrc.includes('DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"') && restartBotSrc.includes('DASHBOARD_HOST="$DASHBOARD_HOST" DASHBOARD_PORT="$DASHBOARD_PORT"'))
+  check('watchdog starts dashboard with unified data env', watchdogSrc.includes('KOISHI_DIR="/root/koishi-app"') && watchdogSrc.includes('KOISHI_DIR="$KOISHI_DIR"') && watchdogSrc.includes('DONGXUELIAN_AI_DATA_DIR="$DATA_DIR"') && watchdogSrc.includes('nohup node standalone.js'))
+  check('data seal script exists and seals package data symlinks', sealDataDirSrc.includes('seal_one "packages/koishi-plugin-dongxuelian-ai/data"') && sealDataDirSrc.includes('ln -s "$DATA_DIR" "$pkg_data"'))
+  check('data seal script archives package data before symlink', sealDataDirSrc.includes('cp -an "$BACKUP_DIR/$rel/." "$DATA_DIR/"') && sealDataDirSrc.includes('deploy-backups'))
+  check('restart scripts call data seal before startup', restartShSrc.includes('scripts/seal-data-dir.sh') && restartBotSrc.includes('scripts/seal-data-dir.sh'))
+  check('setup and watchdog call data seal', setupSrc.includes('scripts/seal-data-dir.sh') && watchdogSrc.includes('scripts/seal-data-dir.sh'))
   check('dashboard hashes large files with bounded chunks', dashboardStandaloneSrc.includes('HASH_CHUNK_BYTES') && dashboardStandaloneSrc.includes('fs.readSync') && !dashboardStandaloneSrc.includes("crypto.createHash('sha256').update(fs.readFileSync(filePath))"))
   check('dashboard limits request/download/static/log/preview sizes', dashboardStandaloneSrc.includes('EFFECTIVE_MAX_BODY_SIZE') && dashboardStandaloneSrc.includes('MAX_DOWNLOAD_BYTES') && dashboardStandaloneSrc.includes('MAX_STATIC_FILE_BYTES') && dashboardStandaloneSrc.includes('MAX_DEPLOY_TASK_LOG_BYTES') && dashboardStandaloneSrc.includes('MAX_AGENT_PREVIEW_FILE_BYTES'))
   check('dashboard limits upload and gallery metadata memory', dashboardStandaloneSrc.includes('MAX_DEPLOY_UPLOAD_BYTES') && dashboardStandaloneSrc.includes('MAX_GALLERY_METADATA_BYTES') && dashboardStandaloneSrc.includes('estimatedBytes'))
